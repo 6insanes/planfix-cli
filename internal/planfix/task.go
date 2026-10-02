@@ -57,3 +57,84 @@ func (c *Client) ListTasks(ctx context.Context, req ListTasksRequest) (*TaskList
 	}
 	return &envelope, raw, nil
 }
+
+// CreateTaskRequest is the body of POST /task. Empty optional fields are
+// omitted from the request body.
+type CreateTaskRequest struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	ProjectID   int         `json:"-"`
+	ParentID    int         `json:"-"`
+	Assignees   []PersonRef `json:"-"`
+	StartDate   string      `json:"-"`
+	EndDate     string      `json:"-"`
+}
+
+// UpdateTaskRequest is the body of POST /task/{id} (partial). Pointer fields
+// are sent only when set, so a zero value leaves the attribute untouched.
+type UpdateTaskRequest struct {
+	Name        *string     `json:"name,omitempty"`
+	Description *string     `json:"description,omitempty"`
+	StartDate   *string     `json:"-"`
+	EndDate     *string     `json:"-"`
+	Status      *int        `json:"-"`
+	Assignees   []PersonRef `json:"-"`
+}
+
+// CreateTask posts a new task and returns its id.
+func (c *Client) CreateTask(ctx context.Context, req CreateTaskRequest) (int, []byte, error) {
+	body := map[string]any{"name": req.Name}
+	if req.Description != "" {
+		body["description"] = req.Description
+	}
+	if req.ProjectID > 0 {
+		body["project"] = map[string]any{"id": req.ProjectID}
+	}
+	if req.ParentID > 0 {
+		body["parent"] = map[string]any{"id": req.ParentID}
+	}
+	if len(req.Assignees) > 0 {
+		body["assignees"] = map[string]any{"users": req.Assignees}
+	}
+	if req.StartDate != "" {
+		body["startDate"] = req.StartDate
+	}
+	if req.EndDate != "" {
+		body["endDate"] = req.EndDate
+	}
+	raw, err := c.JSON(ctx, http.MethodPost, "/task", body)
+	if err != nil {
+		return 0, nil, err
+	}
+	var envelope struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return 0, raw, err
+	}
+	return envelope.ID, raw, nil
+}
+
+// UpdateTask posts a partial update.
+func (c *Client) UpdateTask(ctx context.Context, id int, req UpdateTaskRequest) ([]byte, error) {
+	body := map[string]any{}
+	if req.Name != nil {
+		body["name"] = *req.Name
+	}
+	if req.Description != nil {
+		body["description"] = *req.Description
+	}
+	if req.StartDate != nil {
+		body["startDate"] = *req.StartDate
+	}
+	if req.EndDate != nil {
+		body["endDate"] = *req.EndDate
+	}
+	if req.Status != nil {
+		body["status"] = map[string]any{"id": *req.Status}
+	}
+	if len(req.Assignees) > 0 {
+		body["assignees"] = map[string]any{"users": req.Assignees}
+	}
+	return c.JSON(ctx, http.MethodPost, fmt.Sprintf("/task/%d", id), body)
+}

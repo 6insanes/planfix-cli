@@ -59,7 +59,7 @@ func NewRootCmd() *cobra.Command {
 			Fields: globalOpts.Fields,
 			Quiet:  globalOpts.Quiet,
 		}
-	}))
+	}, activeDomain))
 	return c
 }
 
@@ -82,6 +82,21 @@ func newClient() (*planfix.Client, error) {
 		return nil, fmt.Errorf("profile %q has empty domain or token; run `planfix auth login`", name)
 	}
 	return planfix.New(p.Domain, p.Token)
+}
+
+// activeDomain resolves the active profile's domain for URL printing,
+// falling back to the default Planfix domain when no profile is usable.
+func activeDomain() string {
+	cfg, err := config.Load(config.ResolvePath())
+	if err != nil {
+		return "example.planfix.ru"
+	}
+	name := config.ResolveProfileName(globalOpts.Profile, cfg)
+	p, err := config.Resolve(cfg, name)
+	if err != nil || p.Domain == "" {
+		return "example.planfix.ru"
+	}
+	return p.Domain
 }
 
 // Execute runs the root command.

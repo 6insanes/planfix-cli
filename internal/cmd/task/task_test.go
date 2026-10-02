@@ -55,7 +55,7 @@ func TestViewRejectsInvalidID(t *testing.T) {
 	defer srv.Close()
 
 	for _, args := range [][]string{{"abc"}, {"0"}, {"--", "-3"}} {
-		cmd := NewCmd(stubClient(srv), func() Options { return Options{} })
+		cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, func() string { return "example.com" })
 		out, err := exec(t, cmd, append([]string{"view"}, args...)...)
 		if err == nil {
 			t.Errorf("view %v: error = nil, want failure", args)
@@ -71,7 +71,7 @@ func TestViewRejectsInvalidID(t *testing.T) {
 }
 
 func TestViewRequiresID(t *testing.T) {
-	cmd := NewCmd(nil, func() Options { return Options{} })
+	cmd := NewCmd(nil, func() Options { return Options{} }, func() string { return "example.com" })
 	if _, err := exec(t, cmd, "view"); err == nil {
 		t.Error("view without args: error = nil, want arity failure")
 	}
@@ -89,7 +89,7 @@ func TestListRendersTableColumns(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "list")
 	if err != nil {
 		t.Fatalf("list error = %v", err)
@@ -114,7 +114,7 @@ func TestListHonoursLimitAndOffset(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} }, func() string { return "example.com" })
 	if _, err := exec(t, cmd, "list", "--limit", "5", "--offset", "15"); err != nil {
 		t.Fatalf("list error = %v", err)
 	}
@@ -132,7 +132,7 @@ func TestListJSONOutputsRaw(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{JSON: true} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{JSON: true} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "list")
 	if err != nil {
 		t.Fatalf("list error = %v", err)
@@ -151,7 +151,7 @@ func TestListQuietPrintsIDsOnly(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{Quiet: true} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Quiet: true} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "list")
 	if err != nil {
 		t.Fatalf("list error = %v", err)
@@ -184,7 +184,7 @@ func TestViewRendersDetailKeys(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "view", "42")
 	if err != nil {
 		t.Fatalf("view error = %v", err)
@@ -212,7 +212,7 @@ func TestViewRendersAssignees(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "view", "42")
 	if err != nil {
 		t.Fatalf("view error = %v", err)
@@ -236,7 +236,7 @@ func TestViewFieldsWithSpacesRoundTrip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id, name"} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id, name"} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "view", "42")
 	if err != nil {
 		t.Fatalf("view error = %v", err)
@@ -255,7 +255,7 @@ func TestViewJSONOutputsRaw(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{JSON: true} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{JSON: true} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "view", "3")
 	if err != nil {
 		t.Fatalf("view error = %v", err)
@@ -278,7 +278,7 @@ func TestListFieldsOverrideColumns(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "list")
 	if err != nil {
 		t.Fatalf("list error = %v", err)
@@ -321,7 +321,7 @@ func TestViewFieldsOverrideKeys(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "view", "42")
 	if err != nil {
 		t.Fatalf("view error = %v", err)
@@ -369,7 +369,7 @@ func TestDefaultFieldsUnchanged(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{} })
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, func() string { return "example.com" })
 	listOut, err := exec(t, cmd, "list")
 	if err != nil {
 		t.Fatalf("list error = %v", err)
@@ -419,12 +419,12 @@ func TestDefaultFieldsUnchanged(t *testing.T) {
 }
 
 func TestNewCmdListsSubcommands(t *testing.T) {
-	cmd := NewCmd(nil, func() Options { return Options{} })
+	cmd := NewCmd(nil, func() Options { return Options{} }, func() string { return "example.com" })
 	out, err := exec(t, cmd, "--help")
 	if err != nil {
 		t.Fatalf("help error = %v", err)
 	}
-	for _, want := range []string{"list", "view"} {
+	for _, want := range []string{"list", "view", "create", "update", "open"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("task help missing %q:\n%s", want, out)
 		}

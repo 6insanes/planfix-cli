@@ -25,14 +25,16 @@ type ClientFunc func() (*planfix.Client, error)
 // --limit is passed a non-positive value.
 const defaultListLimit = 50
 
-// NewCmd builds the task command group (read-only commands).
-func NewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
+// NewCmd builds the task command group (read and write commands).
+// getDomain resolves the active profile's domain for `task open`.
+func NewCmd(getClient ClientFunc, getOpts func() Options, getDomain func() string) *cobra.Command {
 	taskCmd := &cobra.Command{
 		Use:   "task",
 		Short: "Work with Planfix tasks",
 	}
 	taskCmd.AddCommand(newListCmd(getClient, getOpts))
 	taskCmd.AddCommand(newViewCmd(getClient, getOpts))
+	NewWriteCmd(taskCmd, getClient, getOpts, getDomain)
 	return taskCmd
 }
 

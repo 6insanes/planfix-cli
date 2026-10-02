@@ -163,3 +163,134 @@ func TestListTasksInvalidFilterJSON(t *testing.T) {
 		t.Errorf("error %q does not mention filter", err)
 	}
 }
+
+func TestCreateTask(t *testing.T) {
+	var gotMethod, gotPath string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(b, &body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"result":"success","id":99}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	id, raw, err := c.CreateTask(context.Background(), CreateTaskRequest{
+		Name:        "New",
+		Description: "desc",
+		ProjectID:   3,
+		ParentID:    4,
+		Assignees:   []PersonRef{{Type: "user", ID: 7}},
+		StartDate:   "2026-01-01",
+		EndDate:     "2026-01-31",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/rest/task" {
+		t.Errorf("request = %s %s, want POST /rest/task", gotMethod, gotPath)
+	}
+	if id != 99 {
+		t.Errorf("id = %d, want 99", id)
+	}
+	if body["name"] != "New" || body["description"] != "desc" {
+		t.Errorf("body name/description = %v/%v", body["name"], body["description"])
+	}
+	if project, _ := body["project"].(map[string]any); project == nil || project["id"] != float64(3) {
+		t.Errorf("body project = %v, want id 3", body["project"])
+	}
+	if parent, _ := body["parent"].(map[string]any); parent == nil || parent["id"] != float64(4) {
+		t.Errorf("body parent = %v, want id 4", body["parent"])
+	}
+	assignees, _ := body["assignees"].(map[string]any)
+	users, _ := assignees["users"].([]any)
+	if len(users) != 1 {
+		t.Fatalf("body assignees.users = %#v, want one entry", body["assignees"])
+	}
+	user, _ := users[0].(map[string]any)
+	if user["type"] != "user" || user["id"] != float64(7) {
+		t.Errorf("assignee = %#v, want {user 7}", user)
+	}
+	if body["startDate"] != "2026-01-01" || body["endDate"] != "2026-01-31" {
+		t.Errorf("body dates = %v/%v", body["startDate"], body["endDate"])
+	}
+	if !strings.Contains(string(raw), `"id":99`) {
+		t.Errorf("raw = %s", raw)
+	}
+}
+
+func TestCreateTaskOmitsEmptyOptionalFields(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &body)
+		_, _ = w.Write([]byte(`{"result":"success","id":1}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, _, err := c.CreateTask(context.Background(), CreateTaskRequest{Name: "Only name"}); err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	if body["name"] != "Only name" {
+		t.Errorf("body = %v", body)
+	}
+	for _, key := range []string{"description", "project", "parent", "assignees", "startDate", "endDate"} {
+		if _, present := body[key]; present {
+			t.Errorf("body unexpectedly contains %q: %v", key, body)
+		}
+	}
+}
+
+func TestUpdateTask(t *testing.T) {
+	var gotMethod, gotPath string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(b, &body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}))
+	defer srv.Close()
+
+	name, desc, end := "Renamed", "new desc", "2026-02-01"
+	status := 5
+	c := newTestClient(t, srv)
+	raw, err := c.UpdateTask(context.Background(), 7, UpdateTaskRequest{
+		Name:        &name,
+		Description: &desc,
+		EndDate:     &end,
+		Status:      &status,
+		Assignees:   []PersonRef{{Type: "contact", ID: 2}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateTask() error = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/rest/task/7" {
+		t.Errorf("request = %s %s, want POST /rest/task/7", gotMethod, gotPath)
+	}
+	if body["name"] != "Renamed" || body["description"] != "new desc" || body["endDate"] != "2026-02-01" {
+		t.Errorf("body = %v", body)
+	}
+	if st, _ := body["status"].(map[string]any); st == nil || st["id"] != float64(5) {
+		t.Errorf("body status = %v, want {id:5}", body["status"])
+	}
+	if _, present := body["startDate"]; present {
+		t.Errorf("body unexpectedly contains startDate: %v", body)
+	}
+	assignees, _ := body["assignees"].(map[string]any)
+	users, _ := assignees["users"].([]any)
+	if len(users) != 1 {
+		t.Fatalf("body assignees.users = %#v, want one entry", body["assignees"])
+	}
+	if !strings.Contains(string(raw), `"result"`) {
+		t.Errorf("raw = %s", raw)
+	}
+}

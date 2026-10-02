@@ -10,6 +10,7 @@ import (
 	"planfix-cli/internal/cmd/auth"
 	"planfix-cli/internal/cmd/comment"
 	"planfix-cli/internal/cmd/task"
+	"planfix-cli/internal/cmd/timecmd"
 	"planfix-cli/internal/config"
 	"planfix-cli/internal/planfix"
 )
@@ -68,6 +69,18 @@ func NewRootCmd() *cobra.Command {
 			Quiet:  globalOpts.Quiet,
 		}
 	}))
+	c.AddCommand(timecmd.NewCmd(newClient, func() timecmd.Options {
+		return timecmd.Options{JSON: globalOpts.JSON, Quiet: globalOpts.Quiet}
+	}, timecmd.DefaultMetaFunc(func() (string, *config.Profile, error) {
+		path := config.ResolvePath()
+		cfg, err := config.Load(path)
+		if err != nil {
+			return "", nil, err
+		}
+		name := config.ResolveProfileName(globalOpts.Profile, cfg)
+		p, err := config.Resolve(cfg, name)
+		return name, p, err
+	})))
 	return c
 }
 

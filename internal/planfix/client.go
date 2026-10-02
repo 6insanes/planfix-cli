@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -19,33 +20,38 @@ type Client struct {
 	HTTP      *http.Client
 }
 
-// New builds a client for domain+token.
-func New(domain, token string) *Client {
+// New builds a client for domain+token. The domain may carry an http(s) scheme
+// and a trailing slash; both are stripped. An empty domain is an error.
+func New(domain, token string) (*Client, error) {
 	domain = strings.TrimPrefix(domain, "https://")
 	domain = strings.TrimPrefix(domain, "http://")
 	domain = strings.TrimSuffix(domain, "/")
+	if domain == "" {
+		return nil, fmt.Errorf("planfix domain must not be empty")
+	}
 	return &Client{
 		BaseURL:   "https://" + domain + "/rest",
 		Token:     token,
 		UserAgent: "planfix-cli",
 		HTTP:      &http.Client{Timeout: 30 * time.Second},
-	}
+	}, nil
 }
 
-// Do sends a request and returns the raw response. Callers inspect StatusCode.
+// Do sends a request and returns the raw response with an open body;
+// the caller must close resp.Body. Callers inspect StatusCode.
 func (c *Client) Do(ctx context.Context, method, path string, body any) (*http.Response, error) {
 	var rdr io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("marshal body: %w", err)
 		}
 		rdr = bytes.NewReader(buf)
 	}
 	url := c.BaseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Accept", "application/json")

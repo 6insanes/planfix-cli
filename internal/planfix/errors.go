@@ -3,6 +3,7 @@ package planfix
 import (
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 )
 
 // APIError is a Planfix REST failure (HTTP or application-level).
@@ -10,13 +11,20 @@ type APIError struct {
 	Status  int
 	Code    int
 	Message string
+	// fromEnvelope marks Message as coming from a Planfix failure envelope
+	// (parsed by ParseError) rather than a raw HTTP error body.
+	fromEnvelope bool
 }
 
 func (e *APIError) Error() string {
-	if e.Code != 0 {
+	switch {
+	case e.Code != 0:
 		return fmt.Sprintf("planfix api error %d: %s", e.Code, e.Message)
+	case e.fromEnvelope:
+		return fmt.Sprintf("planfix failure: %s", e.Message)
+	default:
+		return fmt.Sprintf("planfix http %d: %s", e.Status, e.Message)
 	}
-	return fmt.Sprintf("planfix http %d: %s", e.Status, e.Message)
 }
 
 // Hint returns an actionable suggestion for known app codes.
@@ -46,7 +54,7 @@ func ParseError(status int, body []byte) *APIError {
 			if msg == "" {
 				msg = "unknown error"
 			}
-			return &APIError{Status: status, Code: envelope.Code, Message: msg}
+			return &APIError{Status: status, Code: envelope.Code, Message: msg, fromEnvelope: true}
 		}
 		if status < 300 {
 			return nil
@@ -55,7 +63,11 @@ func ParseError(status int, body []byte) *APIError {
 	if status >= 300 {
 		msg := string(body)
 		if len(msg) > 200 {
-			msg = msg[:200] + "..."
+			cut := 200
+			for cut > 0 && !utf8.RuneStart(msg[cut]) {
+				cut--
+			}
+			msg = msg[:cut] + "..."
 		}
 		return &APIError{Status: status, Message: msg}
 	}

@@ -2,10 +2,14 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"planfix-cli/internal/buildinfo"
+	"planfix-cli/internal/cmd/auth"
+	"planfix-cli/internal/config"
+	"planfix-cli/internal/planfix"
 )
 
 // GlobalOpts holds the persistent flags available to every command.
@@ -44,6 +48,35 @@ func NewRootCmd() *cobra.Command {
 
 // rootCmd is the process-wide tree; subcommands added in this package register onto it.
 var rootCmd = NewRootCmd()
+
+func init() {
+	rootCmd.AddCommand(auth.NewCmd(func() string {
+		cfg, err := config.Load(config.ResolvePath())
+		if err != nil {
+			return "default"
+		}
+		return config.ResolveProfileName(globalOpts.Profile, cfg)
+	}))
+	rootCmd.AddCommand(pingCmd)
+}
+
+// newClient loads the active profile and builds an API client for it.
+func newClient() (*planfix.Client, error) {
+	path := config.ResolvePath()
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	name := config.ResolveProfileName(globalOpts.Profile, cfg)
+	p, err := config.Resolve(cfg, name)
+	if err != nil {
+		return nil, err
+	}
+	if p.Domain == "" || p.Token == "" {
+		return nil, fmt.Errorf("profile %q has empty domain or token; run `planfix auth login`", name)
+	}
+	return planfix.New(p.Domain, p.Token)
+}
 
 // Execute runs the root command.
 func Execute(ctx context.Context) error {

@@ -11,11 +11,11 @@ import (
 )
 
 func TestGetTask(t *testing.T) {
-	var gotMethod, gotPath, gotQuery string
+	var gotMethod, gotPath, gotFields string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
-		gotQuery = r.URL.RawQuery
+		gotFields = r.URL.Query().Get("fields")
 		_, _ = w.Write([]byte(`{"result":"success","task":{"id":7,"name":"Do thing","status":{"id":1,"name":"New"},"priority":"high","startDate":"2026-01-01"}}`))
 	}))
 	defer srv.Close()
@@ -28,14 +28,36 @@ func TestGetTask(t *testing.T) {
 	if gotMethod != http.MethodGet || gotPath != "/rest/task/7" {
 		t.Errorf("request = %s %s, want GET /rest/task/7", gotMethod, gotPath)
 	}
-	if gotQuery != "fields=id,name,status" {
-		t.Errorf("query = %q, want fields=id,name,status", gotQuery)
+	if gotFields != "id,name,status" {
+		t.Errorf("decoded fields = %q, want id,name,status", gotFields)
 	}
 	if task.ID != 7 || task.Name != "Do thing" || task.Status.Name != "New" || task.Priority != "high" {
 		t.Errorf("task = %+v", task)
 	}
 	if !strings.Contains(string(raw), `"id":7`) {
 		t.Errorf("raw = %s", raw)
+	}
+}
+
+func TestGetTaskEscapesFieldsQuery(t *testing.T) {
+	var gotQuery, gotFields string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		gotFields = r.URL.Query().Get("fields")
+		_, _ = w.Write([]byte(`{"result":"success","task":{"id":1}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	const fields = "id, name & status.name=x"
+	if _, _, err := c.GetTask(context.Background(), 1, fields); err != nil {
+		t.Fatalf("GetTask() error = %v", err)
+	}
+	if gotFields != fields {
+		t.Errorf("decoded fields = %q, want %q", gotFields, fields)
+	}
+	if want := "fields=id%2C+name+%26+status.name%3Dx"; gotQuery != want {
+		t.Errorf("query = %q, want %q", gotQuery, want)
 	}
 }
 

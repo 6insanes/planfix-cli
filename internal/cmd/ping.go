@@ -30,10 +30,7 @@ func newPingCmd() *cobra.Command {
 // wrapped with their actionable hint.
 func doPing(ctx context.Context, c *planfix.Client, out io.Writer) error {
 	if _, err := c.JSON(ctx, http.MethodGet, "/ping", nil); err != nil {
-		if h := planfix.HintErr(err); h != "" {
-			return fmt.Errorf("%w (%s)", err, h)
-		}
-		return err
+		return planfix.WrapHint(err)
 	}
 	fmt.Fprintln(out, "OK")
 	return nil

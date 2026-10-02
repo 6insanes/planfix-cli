@@ -93,6 +93,23 @@ func TestHintErr(t *testing.T) {
 	}
 }
 
+func TestWrapHint(t *testing.T) {
+	// Plain errors pass through untouched.
+	plain := errors.New("plain")
+	if got := WrapHint(plain); got != plain {
+		t.Errorf("WrapHint(plain) = %v, want the same error", got)
+	}
+	// Hinted errors gain the " (hint)" suffix and stay unwrappable.
+	apiErr := &APIError{Code: 1, Message: "token not found"}
+	got := WrapHint(apiErr)
+	if !strings.Contains(got.Error(), "auth login") || !strings.HasSuffix(got.Error(), ")") {
+		t.Errorf("WrapHint(APIError) = %q, want hint suffix", got)
+	}
+	if !errors.As(got, new(*APIError)) {
+		t.Errorf("WrapHint(APIError) must remain unwrappable via errors.As")
+	}
+}
+
 func TestHint(t *testing.T) {
 	tests := []struct {
 		code int

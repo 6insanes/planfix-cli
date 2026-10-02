@@ -102,10 +102,7 @@ func newStatusCmd(resolveName func() string) *cobra.Command {
 				return err
 			}
 			if _, err := c.JSON(cmd.Context(), http.MethodGet, "/ping", nil); err != nil {
-				if h := planfix.HintErr(err); h != "" {
-					return fmt.Errorf("%w (%s)", err, h)
-				}
-				return err
+				return planfix.WrapHint(err)
 			}
 			fmt.Fprintln(out, "ping:    OK")
 			return nil

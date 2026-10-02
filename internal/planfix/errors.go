@@ -52,6 +52,15 @@ func HintErr(err error) string {
 	return ""
 }
 
+// WrapHint appends the actionable hint (when present) to err as
+// "err (hint)", preserving errors.Is/As unwrapping.
+func WrapHint(err error) error {
+	if h := HintErr(err); h != "" {
+		return fmt.Errorf("%w (%s)", err, h)
+	}
+	return err
+}
+
 // ParseError turns a response body into *APIError, or nil on success.
 func ParseError(status int, body []byte) *APIError {
 	var envelope struct {

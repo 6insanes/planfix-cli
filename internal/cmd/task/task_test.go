@@ -200,6 +200,55 @@ func TestViewRendersDetailKeys(t *testing.T) {
 	}
 }
 
+func TestViewRendersAssignees(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/task/42" {
+			t.Errorf("request = %s %s, want GET /task/42", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"result":"success","task":{
+			"id":42,"name":"Ship it","status":{"id":3,"name":"Done"},"priority":"urgent",
+			"assignees":{"users":[{"id":5,"name":"Ann"},{"id":6,"name":"Bob"}]}
+		}}`))
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} })
+	out, err := exec(t, cmd, "view", "42")
+	if err != nil {
+		t.Fatalf("view error = %v", err)
+	}
+	for _, want := range []string{"ASSIGNEES:", "Ann, Bob"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view output missing %q:\n%s", want, out)
+		}
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 5 {
+		t.Errorf("line count = %d, want 5 (empty START/END/DESCRIPTION skipped):\n%s", len(lines), out)
+	}
+}
+
+func TestViewFieldsWithSpacesRoundTrip(t *testing.T) {
+	var gotFields string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotFields = r.URL.Query().Get("fields")
+		_, _ = w.Write([]byte(`{"result":"success","task":{"id":42,"name":"Ship it"}}`))
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id, name"} })
+	out, err := exec(t, cmd, "view", "42")
+	if err != nil {
+		t.Fatalf("view error = %v", err)
+	}
+	if gotFields != "id, name" {
+		t.Errorf("decoded fields = %q, want %q", gotFields, "id, name")
+	}
+	if !strings.Contains(out, "ID:") || !strings.Contains(out, "NAME:") {
+		t.Errorf("view output missing ID/NAME rows:\n%s", out)
+	}
+}
+
 func TestViewJSONOutputsRaw(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"result":"success","task":{"id":3,"name":"X"}}`))

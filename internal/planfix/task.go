@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // GetTask fetches one task. Returns the typed task and the raw response body.
 func (c *Client) GetTask(ctx context.Context, id int, fields string) (*Task, []byte, error) {
 	path := fmt.Sprintf("/task/%d", id)
 	if fields != "" {
-		path += "?fields=" + fields
+		path += "?" + url.Values{"fields": {fields}}.Encode()
 	}
 	raw, err := c.JSON(ctx, http.MethodGet, path, nil)
 	if err != nil {

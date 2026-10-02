@@ -21,6 +21,10 @@ type Options struct {
 // ClientFunc builds an API client.
 type ClientFunc func() (*planfix.Client, error)
 
+// defaultListLimit is both the --limit flag default and the fallback when
+// --limit is passed a non-positive value.
+const defaultListLimit = 50
+
 // NewCmd builds the task command group (read-only commands).
 func NewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 	taskCmd := &cobra.Command{
@@ -50,7 +54,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				fields = defaultListFields
 			}
 			if limit <= 0 {
-				limit = 50
+				limit = defaultListLimit
 			}
 			list, raw, err := c.ListTasks(cmd.Context(), planfix.ListTasksRequest{
 				Offset:      offset,
@@ -60,7 +64,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				SavedFilter: savedFilter,
 			})
 			if err != nil {
-				return withHint(err)
+				return planfix.WrapHint(err)
 			}
 			if opts.JSON {
 				return output.JSON(cmd.OutOrStdout(), raw)
@@ -73,7 +77,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				output.Table(cmd.OutOrStdout(), nil, rows)
 				return nil
 			}
-			names := splitFields(fields)
+			names, headers := fieldColumns(fields)
 			rows := make([][]string, 0, len(list.Tasks))
 			for _, t := range list.Tasks {
 				row := make([]string, 0, len(names))
@@ -82,12 +86,12 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				}
 				rows = append(rows, row)
 			}
-			output.Table(cmd.OutOrStdout(), columnsFromFields(fields), rows)
+			output.Table(cmd.OutOrStdout(), headers, rows)
 			return nil
 		},
 	}
 
-	cmd.Flags().IntVar(&limit, "limit", 50, "page size")
+	cmd.Flags().IntVar(&limit, "limit", defaultListLimit, "page size")
 	cmd.Flags().IntVar(&offset, "offset", 0, "offset")
 	cmd.Flags().StringVar(&filter, "filter", "", "raw Planfix filters JSON array")
 	cmd.Flags().StringVar(&savedFilter, "saved-filter", "", "saved filter id (e.g. :in)")
@@ -116,7 +120,7 @@ func newViewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 			}
 			t, raw, err := c.GetTask(cmd.Context(), id, requestFields)
 			if err != nil {
-				return withHint(err)
+				return planfix.WrapHint(err)
 			}
 			if opts.JSON {
 				return output.JSON(cmd.OutOrStdout(), raw)
@@ -129,39 +133,16 @@ func newViewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 			if fields == "" {
 				// Default rendering keeps a curated key order and skips empty
 				// optional values instead of echoing the raw field list.
-				kv = [][2]string{
-					{"ID", strconv.Itoa(t.ID)},
-					{"NAME", t.Name},
-					{"STATUS", t.Status.Name},
-					{"PRIORITY", t.Priority},
-				}
-				if t.StartDate != "" {
-					kv = append(kv, [2]string{"START", t.StartDate})
-				}
-				if t.EndDate != "" {
-					kv = append(kv, [2]string{"END", t.EndDate})
-				}
-				if t.Description != "" {
-					kv = append(kv, [2]string{"DESCRIPTION", t.Description})
-				}
+				kv = defaultViewKV(*t)
 			} else {
-				names := splitFields(fields)
-				cols := columnsFromFields(fields)
+				names, headers := fieldColumns(fields)
 				kv = make([][2]string, 0, len(names))
 				for i, name := range names {
-					kv = append(kv, [2]string{cols[i], fieldValue(*t, name)})
+					kv = append(kv, [2]string{headers[i], fieldValue(*t, name)})
 				}
 			}
 			output.Detail(cmd.OutOrStdout(), kv)
 			return nil
 		},
 	}
-}
-
-// withHint appends an actionable hint to API errors, mirroring ping.
-func withHint(err error) error {
-	if h := planfix.HintErr(err); h != "" {
-		return fmt.Errorf("%w (%s)", err, h)
-	}
-	return err
 }

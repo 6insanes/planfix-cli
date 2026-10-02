@@ -13,28 +13,52 @@ const (
 	defaultViewFields = "id,name,description,status,priority,startDate,endDate,assignees"
 )
 
-// splitFields splits a comma-separated --fields value into trimmed,
-// non-empty field names.
-func splitFields(fields string) []string {
+// fieldColumns splits a comma-separated --fields value into trimmed,
+// non-empty API field names and their display headers ("id" -> "ID",
+// "status.name" -> "STATUS.NAME"), preserving order. Empty input yields
+// nil slices.
+func fieldColumns(fields string) (names, headers []string) {
 	parts := strings.Split(fields, ",")
-	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		if f := strings.TrimSpace(p); f != "" {
-			out = append(out, f)
+		f := strings.TrimSpace(p)
+		if f == "" {
+			continue
 		}
+		names = append(names, f)
+		headers = append(headers, strings.ToUpper(f))
 	}
-	return out
+	return names, headers
 }
 
-// columnsFromFields maps API field names to display column headers,
-// e.g. "id" -> "ID", "status" -> "STATUS" (or "status.name" for nested).
-func columnsFromFields(fields string) []string {
-	names := splitFields(fields)
-	cols := make([]string, 0, len(names))
-	for _, name := range names {
-		cols = append(cols, strings.ToUpper(name))
+// defaultViewRows is the curated default view: display label, API field
+// name, and whether the row is skipped when the value is empty.
+var defaultViewRows = []struct {
+	label    string
+	field    string
+	optional bool
+}{
+	{"ID", "id", false},
+	{"NAME", "name", false},
+	{"STATUS", "status", false},
+	{"PRIORITY", "priority", false},
+	{"START", "startDate", true},
+	{"END", "endDate", true},
+	{"DESCRIPTION", "description", true},
+	{"ASSIGNEES", "assignees", true},
+}
+
+// defaultViewKV renders the curated default view rows for one task via
+// fieldValue, keeping key order and skipping empty optional values.
+func defaultViewKV(t planfix.Task) [][2]string {
+	kv := make([][2]string, 0, len(defaultViewRows))
+	for _, r := range defaultViewRows {
+		v := fieldValue(t, r.field)
+		if r.optional && v == "" {
+			continue
+		}
+		kv = append(kv, [2]string{r.label, v})
 	}
-	return cols
+	return kv
 }
 
 // fieldValue renders one task field as its display string. Unknown fields

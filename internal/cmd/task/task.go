@@ -47,7 +47,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 			opts := getOpts()
 			fields := opts.Fields
 			if fields == "" {
-				fields = "id,name,status,priority"
+				fields = defaultListFields
 			}
 			if limit <= 0 {
 				limit = 50
@@ -73,16 +73,16 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				output.Table(cmd.OutOrStdout(), nil, rows)
 				return nil
 			}
+			names := splitFields(fields)
 			rows := make([][]string, 0, len(list.Tasks))
 			for _, t := range list.Tasks {
-				rows = append(rows, []string{
-					strconv.Itoa(t.ID),
-					t.Name,
-					t.Status.Name,
-					t.Priority,
-				})
+				row := make([]string, 0, len(names))
+				for _, name := range names {
+					row = append(row, fieldValue(t, name))
+				}
+				rows = append(rows, row)
 			}
-			output.Table(cmd.OutOrStdout(), []string{"ID", "NAME", "STATUS", "PRIORITY"}, rows)
+			output.Table(cmd.OutOrStdout(), columnsFromFields(fields), rows)
 			return nil
 		},
 	}
@@ -110,10 +110,11 @@ func newViewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 			}
 			opts := getOpts()
 			fields := opts.Fields
-			if fields == "" {
-				fields = "id,name,description,status,priority,startDate,endDate,assignees"
+			requestFields := fields
+			if requestFields == "" {
+				requestFields = defaultViewFields
 			}
-			t, raw, err := c.GetTask(cmd.Context(), id, fields)
+			t, raw, err := c.GetTask(cmd.Context(), id, requestFields)
 			if err != nil {
 				return withHint(err)
 			}
@@ -124,20 +125,32 @@ func newViewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), t.ID)
 				return nil
 			}
-			kv := [][2]string{
-				{"ID", strconv.Itoa(t.ID)},
-				{"NAME", t.Name},
-				{"STATUS", t.Status.Name},
-				{"PRIORITY", t.Priority},
-			}
-			if t.StartDate != "" {
-				kv = append(kv, [2]string{"START", t.StartDate})
-			}
-			if t.EndDate != "" {
-				kv = append(kv, [2]string{"END", t.EndDate})
-			}
-			if t.Description != "" {
-				kv = append(kv, [2]string{"DESCRIPTION", t.Description})
+			var kv [][2]string
+			if fields == "" {
+				// Default rendering keeps a curated key order and skips empty
+				// optional values instead of echoing the raw field list.
+				kv = [][2]string{
+					{"ID", strconv.Itoa(t.ID)},
+					{"NAME", t.Name},
+					{"STATUS", t.Status.Name},
+					{"PRIORITY", t.Priority},
+				}
+				if t.StartDate != "" {
+					kv = append(kv, [2]string{"START", t.StartDate})
+				}
+				if t.EndDate != "" {
+					kv = append(kv, [2]string{"END", t.EndDate})
+				}
+				if t.Description != "" {
+					kv = append(kv, [2]string{"DESCRIPTION", t.Description})
+				}
+			} else {
+				names := splitFields(fields)
+				cols := columnsFromFields(fields)
+				kv = make([][2]string, 0, len(names))
+				for i, name := range names {
+					kv = append(kv, [2]string{cols[i], fieldValue(*t, name)})
+				}
 			}
 			output.Detail(cmd.OutOrStdout(), kv)
 			return nil

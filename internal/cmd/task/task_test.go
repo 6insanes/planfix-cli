@@ -216,6 +216,159 @@ func TestViewJSONOutputsRaw(t *testing.T) {
 	}
 }
 
+func TestListFieldsOverrideColumns(t *testing.T) {
+	var reqFields string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = jsonDecode(r, &body)
+		reqFields, _ = body["fields"].(string)
+		_, _ = w.Write([]byte(`{"result":"success","tasks":[
+			{"id":1,"name":"First","status":{"id":2,"name":"In progress"},"priority":"high"},
+			{"id":2,"name":"Second","status":{"id":1,"name":"New"},"priority":"low"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} })
+	out, err := exec(t, cmd, "list")
+	if err != nil {
+		t.Fatalf("list error = %v", err)
+	}
+	if reqFields != "id,name" {
+		t.Errorf("request fields = %q, want id,name", reqFields)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("line count = %d, want 3:\n%s", len(lines), out)
+	}
+	header := strings.Fields(lines[0])
+	if len(header) != 2 || header[0] != "ID" || header[1] != "NAME" {
+		t.Errorf("header = %v, want [ID NAME]:\n%s", header, out)
+	}
+	for _, unwanted := range []string{"STATUS", "PRIORITY", "In progress", "high"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("list output must not contain %q:\n%s", unwanted, out)
+		}
+	}
+	for _, want := range []string{"First", "Second"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("list output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestViewFieldsOverrideKeys(t *testing.T) {
+	var reqFields string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/task/42" {
+			t.Errorf("request = %s %s, want GET /task/42", r.Method, r.URL.Path)
+		}
+		reqFields = r.URL.Query().Get("fields")
+		_, _ = w.Write([]byte(`{"result":"success","task":{
+			"id":42,"name":"Ship it","description":"long text",
+			"status":{"id":3,"name":"Done"},"priority":"urgent",
+			"startDate":"2026-02-01","endDate":"2026-02-10"
+		}}`))
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Fields: "id,name"} })
+	out, err := exec(t, cmd, "view", "42")
+	if err != nil {
+		t.Fatalf("view error = %v", err)
+	}
+	if reqFields != "id,name" {
+		t.Errorf("request fields = %q, want id,name", reqFields)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("line count = %d, want 2:\n%s", len(lines), out)
+	}
+	for _, want := range []string{"ID:", "NAME:", "42", "Ship it"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view output missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"STATUS:", "PRIORITY:", "START:", "END:", "DESCRIPTION:", "Done", "long text"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("view output must not contain %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+func TestDefaultFieldsUnchanged(t *testing.T) {
+	var listFields, viewFields string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/task/list":
+			var body map[string]any
+			_ = jsonDecode(r, &body)
+			listFields, _ = body["fields"].(string)
+			_, _ = w.Write([]byte(`{"result":"success","tasks":[
+				{"id":1,"name":"First","status":{"id":2,"name":"In progress"},"priority":"high"}
+			]}`))
+		case "/task/42":
+			viewFields = r.URL.Query().Get("fields")
+			_, _ = w.Write([]byte(`{"result":"success","task":{
+				"id":42,"name":"Ship it","description":"long text",
+				"status":{"id":3,"name":"Done"},"priority":"urgent",
+				"startDate":"2026-02-01","endDate":"2026-02-10"
+			}}`))
+		default:
+			t.Errorf("unexpected request path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} })
+	listOut, err := exec(t, cmd, "list")
+	if err != nil {
+		t.Fatalf("list error = %v", err)
+	}
+	viewOut, err := exec(t, cmd, "view", "42")
+	if err != nil {
+		t.Fatalf("view error = %v", err)
+	}
+	if listFields != "id,name,status,priority" {
+		t.Errorf("list request fields = %q, want id,name,status,priority", listFields)
+	}
+	if viewFields != "id,name,description,status,priority,startDate,endDate,assignees" {
+		t.Errorf("view request fields = %q, want default view fields", viewFields)
+	}
+	header := strings.Fields(strings.Split(listOut, "\n")[0])
+	wantHeader := []string{"ID", "NAME", "STATUS", "PRIORITY"}
+	if len(header) != len(wantHeader) {
+		t.Errorf("list header = %v, want %v", header, wantHeader)
+	} else {
+		for i := range wantHeader {
+			if header[i] != wantHeader[i] {
+				t.Errorf("list header = %v, want %v", header, wantHeader)
+				break
+			}
+		}
+	}
+	wantKeys := []string{"ID", "NAME", "STATUS", "PRIORITY", "START", "END", "DESCRIPTION"}
+	var keys []string
+	for _, line := range strings.Split(strings.TrimRight(viewOut, "\n"), "\n") {
+		key, _, ok := strings.Cut(line, ":")
+		if !ok {
+			t.Errorf("view line %q is not a key/value row", line)
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) != len(wantKeys) {
+		t.Errorf("view keys = %v, want %v", keys, wantKeys)
+	} else {
+		for i := range wantKeys {
+			if keys[i] != wantKeys[i] {
+				t.Errorf("view keys = %v, want %v", keys, wantKeys)
+				break
+			}
+		}
+	}
+}
+
 func TestNewCmdListsSubcommands(t *testing.T) {
 	cmd := NewCmd(nil, func() Options { return Options{} })
 	out, err := exec(t, cmd, "--help")

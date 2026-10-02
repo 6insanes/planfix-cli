@@ -39,12 +39,13 @@ type TaskList struct {
 	Tasks []Task `json:"tasks"`
 }
 
-// ListTasksRequest is the body of POST /task/list. FilterJSON is injected
-// under "filters" after validation, so it carries no struct tag.
+// ListTasksRequest is the input to POST /task/list. Fields carry no JSON
+// tags: ListTasks builds the wire shape in its method body (FilterJSON is
+// validated then injected under "filters").
 type ListTasksRequest struct {
-	Offset      int    `json:"offset"`
-	PageSize    int    `json:"pageSize"`
-	Fields      string `json:"fields,omitempty"`
-	FilterJSON  string `json:"-"`
-	SavedFilter string `json:"filterId,omitempty"`
+	Offset      int
+	PageSize    int
+	Fields      string
+	FilterJSON  string
+	SavedFilter string
 }

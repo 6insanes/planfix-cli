@@ -58,27 +58,28 @@ func (c *Client) ListTasks(ctx context.Context, req ListTasksRequest) (*TaskList
 	return &envelope, raw, nil
 }
 
-// CreateTaskRequest is the body of POST /task. Empty optional fields are
-// omitted from the request body.
+// CreateTaskRequest is the input to POST /task. Fields carry no JSON tags:
+// CreateTask builds the wire shape in its method body, omitting empty values.
 type CreateTaskRequest struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description,omitempty"`
-	ProjectID   int         `json:"-"`
-	ParentID    int         `json:"-"`
-	Assignees   []PersonRef `json:"-"`
-	StartDate   string      `json:"-"`
-	EndDate     string      `json:"-"`
+	Name        string
+	Description string
+	ProjectID   int
+	ParentID    int
+	Assignees   []PersonRef
+	StartDate   string
+	EndDate     string
 }
 
-// UpdateTaskRequest is the body of POST /task/{id} (partial). Pointer fields
-// are sent only when set, so a zero value leaves the attribute untouched.
+// UpdateTaskRequest is the input to POST /task/{id} (partial). Fields carry
+// no JSON tags: UpdateTask builds the wire shape in its method body. Pointer
+// fields are sent only when set, so a zero value leaves the attribute untouched.
 type UpdateTaskRequest struct {
-	Name        *string     `json:"name,omitempty"`
-	Description *string     `json:"description,omitempty"`
-	StartDate   *string     `json:"-"`
-	EndDate     *string     `json:"-"`
-	Status      *int        `json:"-"`
-	Assignees   []PersonRef `json:"-"`
+	Name        *string
+	Description *string
+	StartDate   *string
+	EndDate     *string
+	Status      *int
+	Assignees   []PersonRef
 }
 
 // CreateTask posts a new task and returns its id.

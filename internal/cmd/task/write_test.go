@@ -227,6 +227,23 @@ func TestOpenPrintsURL(t *testing.T) {
 	}
 }
 
+func TestOpenNormalizesDomain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("open must not call the API")
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} },
+		func() string { return "https://example.com/" })
+	out, err := exec(t, cmd, "open", "1")
+	if err != nil {
+		t.Fatalf("open error = %v", err)
+	}
+	if out != "https://example.com/task/1\n" {
+		t.Errorf("open output = %q, want https://example.com/task/1 (scheme and slash stripped)", out)
+	}
+}
+
 func TestOpenRejectsInvalidID(t *testing.T) {
 	cmd := writeCmd(nil, Options{})
 	for _, args := range [][]string{{"abc"}, {"0"}, {"--", "-3"}} {

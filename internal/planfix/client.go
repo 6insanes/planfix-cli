@@ -20,12 +20,19 @@ type Client struct {
 	HTTP      *http.Client
 }
 
+// NormalizeDomain strips an http(s) scheme and one trailing slash from a
+// configured domain so URL printing and BaseURL building agree. It is
+// idempotent.
+func NormalizeDomain(domain string) string {
+	domain = strings.TrimPrefix(domain, "https://")
+	domain = strings.TrimPrefix(domain, "http://")
+	return strings.TrimSuffix(domain, "/")
+}
+
 // New builds a client for domain+token. The domain may carry an http(s) scheme
 // and a trailing slash; both are stripped. An empty domain is an error.
 func New(domain, token string) (*Client, error) {
-	domain = strings.TrimPrefix(domain, "https://")
-	domain = strings.TrimPrefix(domain, "http://")
-	domain = strings.TrimSuffix(domain, "/")
+	domain = NormalizeDomain(domain)
 	if domain == "" {
 		return nil, fmt.Errorf("planfix domain must not be empty")
 	}

@@ -128,6 +128,29 @@ func TestNewNormalizesDomain(t *testing.T) {
 	}
 }
 
+func TestNormalizeDomain(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"acme.planfix.ru", "acme.planfix.ru"},
+		{"https://acme.planfix.ru", "acme.planfix.ru"},
+		{"http://acme.planfix.ru", "acme.planfix.ru"},
+		{"https://acme.planfix.ru/", "acme.planfix.ru"},
+		{"http://acme.planfix.ru//", "acme.planfix.ru/"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := NormalizeDomain(tt.in); got != tt.want {
+			t.Errorf("NormalizeDomain(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	// Idempotent: printing a normalized domain twice must not change it.
+	if got := NormalizeDomain(NormalizeDomain("https://acme.planfix.ru/")); got != "acme.planfix.ru" {
+		t.Errorf("double NormalizeDomain = %q, want acme.planfix.ru", got)
+	}
+}
+
 func TestNewRejectsEmptyDomain(t *testing.T) {
 	for _, in := range []string{"", "https://", "http://", "/"} {
 		if _, err := New(in, "tok"); err == nil {

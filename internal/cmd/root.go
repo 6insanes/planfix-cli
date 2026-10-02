@@ -8,6 +8,7 @@ import (
 
 	"planfix-cli/internal/buildinfo"
 	"planfix-cli/internal/cmd/auth"
+	"planfix-cli/internal/cmd/comment"
 	"planfix-cli/internal/cmd/task"
 	"planfix-cli/internal/config"
 	"planfix-cli/internal/planfix"
@@ -60,6 +61,13 @@ func NewRootCmd() *cobra.Command {
 			Quiet:  globalOpts.Quiet,
 		}
 	}, activeDomain))
+	c.AddCommand(comment.NewCmd(newClient, func() comment.Options {
+		return comment.Options{
+			JSON:   globalOpts.JSON,
+			Fields: globalOpts.Fields,
+			Quiet:  globalOpts.Quiet,
+		}
+	}))
 	return c
 }
 
@@ -96,7 +104,7 @@ func activeDomain() string {
 	if err != nil || p.Domain == "" {
 		return "example.planfix.ru"
 	}
-	return p.Domain
+	return planfix.NormalizeDomain(p.Domain)
 }
 
 // Execute runs the root command.

@@ -44,18 +44,9 @@ func parsePeople(spec string) ([]planfix.PersonRef, error) {
 	return out, nil
 }
 
-// writeResult renders a create/update outcome: JSON body, quiet id, or a
-// human-readable confirmation line.
-func writeResult(w io.Writer, opts Options, verb string, id int, raw []byte) error {
-	switch {
-	case opts.JSON:
-		return output.JSON(w, raw)
-	case opts.Quiet:
-		fmt.Fprintln(w, id)
-	default:
-		fmt.Fprintf(w, "%s task %d\n", verb, id)
-	}
-	return nil
+// writeTaskResult renders a create/update outcome via output.WriteResult.
+func writeTaskResult(w io.Writer, opts Options, verb string, id int, raw []byte) error {
+	return output.WriteResult(w, output.WriteOpts{JSON: opts.JSON, Quiet: opts.Quiet}, verb, "task", id, raw)
 }
 
 func newCreateCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
@@ -89,7 +80,7 @@ func newCreateCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 			if err != nil {
 				return planfix.WrapHint(err)
 			}
-			return writeResult(cmd.OutOrStdout(), getOpts(), "Created", id, raw)
+			return writeTaskResult(cmd.OutOrStdout(), getOpts(), "Created", id, raw)
 		},
 	}
 
@@ -150,7 +141,7 @@ func newUpdateCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 			if err != nil {
 				return planfix.WrapHint(err)
 			}
-			return writeResult(cmd.OutOrStdout(), getOpts(), "Updated", id, raw)
+			return writeTaskResult(cmd.OutOrStdout(), getOpts(), "Updated", id, raw)
 		},
 	}
 
@@ -173,7 +164,7 @@ func newOpenCmd(getDomain func() string) *cobra.Command {
 			if err != nil || id <= 0 {
 				return fmt.Errorf("invalid task id %q", args[0])
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "https://%s/task/%d\n", getDomain(), id)
+			fmt.Fprintf(cmd.OutOrStdout(), "https://%s/task/%d\n", planfix.NormalizeDomain(getDomain()), id)
 			return nil
 		},
 	}

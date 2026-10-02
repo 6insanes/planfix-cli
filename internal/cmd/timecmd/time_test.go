@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -99,9 +100,13 @@ func TestParseHours(t *testing.T) {
 		{"1.5", 1.5, false},
 		{"2", 2, false},
 		{"0.25", 0.25, false},
+		{"1.999", 2, false}, // rounded to whole minutes
 		{"-1", 0, true},
 		{"0", 0, true},
 		{"abc", 0, true},
+		{"0.0001", 0, true}, // under a minute
+		{"24", 0, true},
+		{"48", 0, true},
 	}
 	for _, tt := range tests {
 		got, err := ParseHours(tt.in)
@@ -118,6 +123,10 @@ func TestParseHours(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("ParseHours(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+
+	if _, err := ParseHours("24"); err == nil || !strings.Contains(err.Error(), "log one entry per day") {
+		t.Errorf("ParseHours(24) error = %v, want mention of one entry per day", err)
 	}
 }
 
@@ -144,6 +153,22 @@ func TestParseFromTo(t *testing.T) {
 	}
 	if _, _, err := ParseFromTo("2026-10-02 10:00", "10/02/2026"); err == nil {
 		t.Error("bad to format: error = nil, want failure")
+	}
+
+	for _, tt := range []struct{ from, to string }{
+		{"2026-10-02 10:00", "2026-10-03 10:00"}, // exactly 24h
+		{"2026-10-02 10:00", "2026-10-04 12:00"}, // multi-day
+	} {
+		if _, _, err := ParseFromTo(tt.from, tt.to); err == nil {
+			t.Errorf("span %s..%s: error = nil, want 24h rejection", tt.from, tt.to)
+		} else if !strings.Contains(err.Error(), "log one entry per day") {
+			t.Errorf("span %s..%s: error = %q, want mention of one entry per day", tt.from, tt.to, err)
+		}
+	}
+
+	// Overnight but under 24h is still a valid single entry.
+	if _, _, err := ParseFromTo("2026-10-02 22:00", "2026-10-03 05:00"); err != nil {
+		t.Errorf("overnight under 24h: error = %v, want success", err)
 	}
 }
 
@@ -194,6 +219,91 @@ func TestAddRequiresFromAndToTogether(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "together") {
 		t.Errorf("error = %q, want mention of togetherness", err)
+	}
+}
+
+func TestAddRejectsHoursOf24OrMore(t *testing.T) {
+	srv := noCalls(t)
+	cmd := testCmd(srv, Options{}, testMeta())
+	_, err := exec(t, cmd, "add", "1", "--hours", "24")
+	if err == nil {
+		t.Fatal("--hours 24: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "log one entry per day") {
+		t.Errorf("error = %q, want mention of one entry per day", err)
+	}
+}
+
+func TestAddRejectsMultiDayFromTo(t *testing.T) {
+	srv := noCalls(t)
+	cmd := testCmd(srv, Options{}, testMeta())
+	_, err := exec(t, cmd, "add", "1",
+		"--from", "2026-10-02 10:00", "--to", "2026-10-04 12:00")
+	if err == nil {
+		t.Fatal("multi-day span: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "log one entry per day") {
+		t.Errorf("error = %q, want mention of one entry per day", err)
+	}
+}
+
+func TestAddRejectsNegativeWorkType(t *testing.T) {
+	srv := noCalls(t)
+	cmd := testCmd(srv, Options{}, testMeta())
+	_, err := exec(t, cmd, "add", "1", "--hours", "1", "--work-type=-1")
+	if err == nil {
+		t.Fatal("--work-type -1: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "work-type") {
+		t.Errorf("error = %q, want mention of --work-type", err)
+	}
+}
+
+func TestAddWorkTypeWithoutFieldFails(t *testing.T) {
+	srv := noCalls(t) // rejected before any API call
+	meta := testMeta()
+	meta.FieldWorkType = 0
+	cmd := testCmd(srv, Options{}, meta)
+	_, err := exec(t, cmd, "add", "1", "--hours", "1", "--work-type", "5")
+	if err == nil {
+		t.Fatal("work type without field: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "work type") {
+		t.Errorf("error = %q, want mention of work type", err)
+	}
+}
+
+func TestAddRoundsHoursToWholeMinutes(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = jsonDecode(r, &body)
+		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+	}))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{}, testMeta())
+	if _, err := exec(t, cmd, "add", "1", "--hours", "1.907"); err != nil {
+		t.Fatalf("add error = %v", err)
+	}
+	cfd, _ := body["customFieldData"].([]any)
+	timeVal := cfd[1].(map[string]any)["value"].(map[string]any)
+	fromStr := timeVal["from"].(map[string]any)["time"].(string)
+	toStr := timeVal["to"].(map[string]any)["time"].(string)
+	from, err := time.Parse("15:04", fromStr)
+	if err != nil {
+		t.Fatalf("parse from %q: %v", fromStr, err)
+	}
+	to, err := time.Parse("15:04", toStr)
+	if err != nil {
+		t.Fatalf("parse to %q: %v", toStr, err)
+	}
+	mins := to.Sub(from).Minutes()
+	if mins < 0 {
+		mins += 24 * 60
+	}
+	// 1.907h = 114.42min, rounded to 114 whole minutes.
+	if mins != 114 {
+		t.Errorf("interval %s-%s = %v minutes, want 114 (rounded)", fromStr, toStr, mins)
 	}
 }
 
@@ -324,6 +434,32 @@ func TestAddNotePostsFollowUpComment(t *testing.T) {
 	}
 	if bodies[1]["silent"] != true {
 		t.Errorf("note silent = %v, want true", bodies[1]["silent"])
+	}
+}
+
+func TestAddNoteFailureSurfacesWorklogID(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"result":"failure","code":3,"message":"boom"}`))
+	}))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{}, testMeta())
+	out, err := exec(t, cmd, "add", "1", "--hours", "1", "--note", "did stuff")
+	if err == nil {
+		t.Fatal("note failure: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "worklog 77 created; note failed") {
+		t.Errorf("error = %q, want mention of created worklog 77", err)
+	}
+	if out != "" {
+		t.Errorf("output = %q, want empty (no success line)", out)
 	}
 }
 
@@ -545,5 +681,45 @@ func TestDefaultMetaFuncDiscoversCachesAndRefreshes(t *testing.T) {
 	}
 	if hits != 4 {
 		t.Errorf("hits after refresh = %d, want 4 (re-discovered)", hits)
+	}
+}
+
+func TestDefaultMetaFuncWarnsAndContinuesWhenPersistFails(t *testing.T) {
+	// A directory path makes config.Load fail, so persistMeta errors.
+	t.Setenv("PLANFIX_CONFIG", t.TempDir())
+
+	var hits int
+	srv := discoverServer(t, &hits)
+	c, err := planfix.New("example.com", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+
+	fn := DefaultMetaFunc(func() (string, *config.Profile, error) {
+		return "default", &config.Profile{Domain: "example.com", Token: "tok"}, nil
+	})
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	got, callErr := fn(context.Background(), c, false)
+	os.Stderr = old
+	w.Close()
+	var warn bytes.Buffer
+	_, _ = io.Copy(&warn, r)
+	r.Close()
+
+	if callErr != nil {
+		t.Fatalf("MetaFunc() error = %v, want success with warning", callErr)
+	}
+	if got == nil || got.DataTagID != 2 {
+		t.Fatalf("meta = %+v, want discovered meta despite persist failure", got)
+	}
+	if !strings.Contains(warn.String(), "warning") {
+		t.Errorf("stderr = %q, want persist warning", warn.String())
 	}
 }

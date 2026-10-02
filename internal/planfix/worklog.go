@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -40,6 +41,13 @@ type DataTagEntry struct {
 
 // CreateWorklogEntry writes a data-tag comment carrying the worklog fields.
 func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *config.WorklogMeta, e WorklogEntry) (int, []byte, error) {
+	if e.WorkTypeKey < 0 {
+		return 0, nil, fmt.Errorf("work type key %d must not be negative", e.WorkTypeKey)
+	}
+	if e.WorkTypeKey != 0 && meta.FieldWorkType == 0 {
+		return 0, nil, fmt.Errorf(
+			"work type key %d requested but the account has no work type field", e.WorkTypeKey)
+	}
 	cfd := []map[string]any{
 		{"field": map[string]any{"id": meta.FieldDate}, "value": map[string]any{"date": e.Date}},
 		{
@@ -78,27 +86,78 @@ func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *confi
 // be identified and parsed.
 const worklogListFields = "id,text,type,dataTag,customFieldData,author,timestamp"
 
+// apiDateLayout is the worklog date format (dd-MM-yyyy).
+const apiDateLayout = "02-01-2006"
+
 // ListWorklog returns the task's worklog rows: comments whose data tag is
-// the worklog meta's tag, parsed into date/period/work type.
+// the worklog meta's tag, parsed into date/period/work type. Comments are
+// fetched in pages of commentPageSize until a short page, then rows are
+// sorted by date and start time.
 func (c *Client) ListWorklog(ctx context.Context, taskID int, meta *config.WorklogMeta) ([]WorklogRow, []byte, error) {
-	_, raw, err := c.ListComments(ctx, taskID, worklogListFields)
-	if err != nil {
-		return nil, nil, err
+	var (
+		comments []DataTagEntry
+		raw      []byte
+		pages    int
+	)
+	for offset := 0; ; offset += commentPageSize {
+		pageRaw, err := c.listCommentsPage(ctx, taskID, worklogListFields, offset, commentPageSize)
+		if err != nil {
+			return nil, nil, err
+		}
+		var envelope struct {
+			Comments []DataTagEntry `json:"comments"`
+		}
+		if err := json.Unmarshal(pageRaw, &envelope); err != nil {
+			return nil, pageRaw, err
+		}
+		if pages == 0 {
+			raw = pageRaw
+		}
+		pages++
+		comments = append(comments, envelope.Comments...)
+		if len(envelope.Comments) < commentPageSize {
+			break
+		}
 	}
-	var envelope struct {
-		Comments []DataTagEntry `json:"comments"`
+	if pages > 1 {
+		merged, err := json.Marshal(struct {
+			Result   string         `json:"result"`
+			Comments []DataTagEntry `json:"comments"`
+		}{Result: "success", Comments: comments})
+		if err != nil {
+			return nil, raw, err
+		}
+		raw = merged
 	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return nil, raw, err
-	}
-	rows := make([]WorklogRow, 0, len(envelope.Comments))
-	for _, e := range envelope.Comments {
+	rows := make([]WorklogRow, 0, len(comments))
+	for _, e := range comments {
 		if e.DataTag.ID != meta.DataTagID {
 			continue
 		}
 		rows = append(rows, worklogRow(e, meta))
 	}
+	sortWorklogRows(rows)
 	return rows, raw, nil
+}
+
+// sortWorklogRows orders rows by calendar date, then by start time.
+func sortWorklogRows(rows []WorklogRow) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		di, dj := parseWorklogDate(rows[i].Date), parseWorklogDate(rows[j].Date)
+		if !di.Equal(dj) {
+			return di.Before(dj)
+		}
+		return rows[i].From < rows[j].From
+	})
+}
+
+// parseWorklogDate parses dd-MM-yyyy; malformed dates sort as the zero time.
+func parseWorklogDate(s string) time.Time {
+	d, err := time.Parse(apiDateLayout, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return d
 }
 
 // worklogRow maps one data-tag comment's customFieldData onto a WorklogRow.

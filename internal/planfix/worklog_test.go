@@ -3,6 +3,7 @@ package planfix
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -93,9 +94,11 @@ func TestCreateWorklogEntry(t *testing.T) {
 	}
 }
 
-func TestCreateWorklogEntryOmitsWorkType(t *testing.T) {
+func TestCreateWorklogEntryRequiresWorkTypeField(t *testing.T) {
+	var calls int
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
 		_, _ = w.Write([]byte(`{"result":"success","id":5}`))
@@ -107,24 +110,41 @@ func TestCreateWorklogEntryOmitsWorkType(t *testing.T) {
 	meta.FieldWorkType = 0 // discovered without a work-type field
 	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, meta, WorklogEntry{
 		Date: "02-10-2026", From: "10:00", To: "12:00", WorkTypeKey: 1,
-	}); err != nil {
-		t.Fatalf("CreateWorklogEntry() error = %v", err)
+	}); err == nil {
+		t.Fatal("work type without field: error = nil, want failure")
+	} else if !strings.Contains(err.Error(), "work type") {
+		t.Errorf("error = %q, want mention of work type", err)
 	}
-	cfd, _ := body["customFieldData"].([]any)
-	if len(cfd) != 2 {
-		t.Errorf("customFieldData len = %d, want 2 (work type omitted)", len(cfd))
+	if calls != 0 {
+		t.Errorf("API calls = %d, want 0 (rejected before the request)", calls)
 	}
 
-	// WorkTypeKey 0 with a mapped field must also omit the entry.
-	body = nil
+	// WorkTypeKey 0 with a mapped field omits the entry.
 	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, worklogTestMeta(), WorklogEntry{
 		Date: "02-10-2026", From: "10:00", To: "12:00",
 	}); err != nil {
 		t.Fatalf("CreateWorklogEntry() error = %v", err)
 	}
-	cfd, _ = body["customFieldData"].([]any)
+	cfd, _ := body["customFieldData"].([]any)
 	if len(cfd) != 2 {
 		t.Errorf("customFieldData len = %d, want 2 (WorkTypeKey 0)", len(cfd))
+	}
+}
+
+func TestCreateWorklogEntryRejectsNegativeWorkType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("API must not be called for a negative work type key")
+		_, _ = w.Write([]byte(`{"result":"success","id":5}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, worklogTestMeta(), WorklogEntry{
+		Date: "02-10-2026", From: "10:00", To: "12:00", WorkTypeKey: -1,
+	}); err == nil {
+		t.Fatal("negative work type: error = nil, want failure")
+	} else if !strings.Contains(err.Error(), "negative") {
+		t.Errorf("error = %q, want mention of negative", err)
 	}
 }
 
@@ -214,6 +234,105 @@ func TestListWorklog(t *testing.T) {
 	}
 	if r1.Author != "Bob" {
 		t.Errorf("row1 author = %q, want Bob", r1.Author)
+	}
+}
+
+func TestListWorklogPagesBeyond100Comments(t *testing.T) {
+	var offsets, pageSizes []float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &body)
+		off, _ := body["offset"].(float64)
+		ps, _ := body["pageSize"].(float64)
+		offsets = append(offsets, off)
+		pageSizes = append(pageSizes, ps)
+
+		n, start := 100, 1
+		if off > 0 {
+			n, start = 1, 101 // short page ends the loop
+		}
+		parts := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			parts = append(parts, fmt.Sprintf(
+				`{"id":%d,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+				 "customFieldData":[
+					{"field":{"id":456},"value":{"date":"02-10-2026"}},
+					{"field":{"id":789},"value":{"from":{"time":"10:00"},"to":{"time":"12:00"}}}
+				 ]}`, start+i))
+		}
+		fmt.Fprintf(w, `{"result":"success","comments":[%s]}`, strings.Join(parts, ","))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	rows, raw, err := c.ListWorklog(context.Background(), 1, worklogTestMeta())
+	if err != nil {
+		t.Fatalf("ListWorklog() error = %v", err)
+	}
+	if len(rows) != 101 {
+		t.Errorf("rows = %d, want 101 (paged past the first 100)", len(rows))
+	}
+	if len(offsets) != 2 || offsets[0] != 0 || offsets[1] != 100 {
+		t.Errorf("offsets = %v, want [0 100]", offsets)
+	}
+	for _, ps := range pageSizes {
+		if ps != 100 {
+			t.Errorf("pageSize = %v, want 100", ps)
+		}
+	}
+	var merged struct {
+		Comments []json.RawMessage `json:"comments"`
+	}
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		t.Fatalf("raw is not JSON: %v", err)
+	}
+	if len(merged.Comments) != 101 {
+		t.Errorf("raw comments = %d, want 101 (pages merged)", len(merged.Comments))
+	}
+}
+
+func TestListWorklogSortsByDateAndFrom(t *testing.T) {
+	// Deliberately unordered; a string sort would put 02-10-2026 before
+	// 15-12-2025 even though 2025 comes first chronologically.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":"success","comments":[
+			{"id":1,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+			 "customFieldData":[
+				{"field":{"id":456},"value":{"date":"02-10-2026"}},
+				{"field":{"id":789},"value":{"from":{"time":"14:00"},"to":{"time":"15:00"}}}
+			 ]},
+			{"id":2,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+			 "customFieldData":[
+				{"field":{"id":456},"value":{"date":"15-12-2025"}},
+				{"field":{"id":789},"value":{"from":{"time":"09:00"},"to":{"time":"10:00"}}}
+			 ]},
+			{"id":3,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+			 "customFieldData":[
+				{"field":{"id":456},"value":{"date":"02-10-2026"}},
+				{"field":{"id":789},"value":{"from":{"time":"09:00"},"to":{"time":"10:00"}}}
+			 ]}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	rows, _, err := c.ListWorklog(context.Background(), 1, worklogTestMeta())
+	if err != nil {
+		t.Fatalf("ListWorklog() error = %v", err)
+	}
+	want := []struct{ date, from string }{
+		{"15-12-2025", "09:00"},
+		{"02-10-2026", "09:00"},
+		{"02-10-2026", "14:00"},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %d, want %d", len(rows), len(want))
+	}
+	for i, w := range want {
+		if rows[i].Date != w.date || rows[i].From != w.from {
+			t.Errorf("row%d = %s %s, want %s %s", i, rows[i].Date, rows[i].From, w.date, w.from)
+		}
 	}
 }
 

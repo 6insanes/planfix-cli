@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"time"
 
@@ -41,16 +42,26 @@ const apiDateLayout = "02-01-2006"
 // timeLayout is the worklog clock-time format (HH:MM).
 const timeLayout = "15:04"
 
-// ParseHours parses a positive worked-hours value.
+// ParseHours parses a positive worked-hours value, rounded to whole
+// minutes. Entries span at most one day, so 24 hours or more is rejected.
 func ParseHours(s string) (float64, error) {
 	h, err := strconv.ParseFloat(s, 64)
 	if err != nil || h <= 0 {
 		return 0, fmt.Errorf("invalid hours %q: must be a positive number", s)
 	}
+	h = math.Round(h*60) / 60
+	if h <= 0 {
+		return 0, fmt.Errorf("invalid hours %q: must be at least one minute", s)
+	}
+	if h >= 24 {
+		return 0, fmt.Errorf("invalid hours %q: worklog entries must be under 24 hours; log one entry per day", s)
+	}
 	return h, nil
 }
 
 // ParseFromTo parses the --from/--to bounds and requires to > from.
+// Spans of 24 hours or more are rejected: entries store one HH:MM period
+// per date.
 func ParseFromTo(from, to string) (time.Time, time.Time, error) {
 	f, err := time.Parse(dateTimeLayout, from)
 	if err != nil {
@@ -62,6 +73,11 @@ func ParseFromTo(from, to string) (time.Time, time.Time, error) {
 	}
 	if !t.After(f) {
 		return time.Time{}, time.Time{}, fmt.Errorf("--to %q must be after --from %q", to, from)
+	}
+	if d := t.Sub(f); d >= 24*time.Hour {
+		return time.Time{}, time.Time{}, fmt.Errorf(
+			"--from %q to --to %q spans %v; worklog entries must be under 24 hours; log one entry per day",
+			from, to, d)
 	}
 	return f, t, nil
 }
@@ -91,6 +107,9 @@ func parseTaskID(args []string) (int, error) {
 func buildEntry(hours, from, to, dateFlag string, workType int) (planfix.WorklogEntry, error) {
 	var e planfix.WorklogEntry
 	e.WorkTypeKey = workType
+	if workType < 0 {
+		return e, fmt.Errorf("invalid --work-type %d: must not be negative", workType)
+	}
 
 	// parseDate is only called when dateFlag is set.
 	parseDate := func() (time.Time, error) {
@@ -110,7 +129,8 @@ func buildEntry(hours, from, to, dateFlag string, workType int) (planfix.Worklog
 			return e, err
 		}
 		end := time.Now()
-		start := end.Add(-time.Duration(h * float64(time.Hour)))
+		// Whole minutes keep the formatted HH:MM bounds an exact duration apart.
+		start := end.Add(-time.Duration(math.Round(h*60)) * time.Minute)
 		e.From = start.Format(timeLayout)
 		e.To = end.Format(timeLayout)
 		day := end
@@ -175,7 +195,7 @@ func newAddCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) *
 			}
 			if note != "" {
 				if _, _, err := c.AddComment(cmd.Context(), id, note, true); err != nil {
-					return planfix.WrapHint(err)
+					return planfix.WrapHint(fmt.Errorf("worklog %d created; note failed: %w", wid, err))
 				}
 			}
 			opts := getOpts()
@@ -282,7 +302,7 @@ func DefaultMetaFunc(resolveProfile func() (string, *config.Profile, error)) Met
 			return nil, err
 		}
 		if err := persistMeta(name, meta); err != nil {
-			return nil, err
+			fmt.Fprintf(os.Stderr, "warning: could not save worklog metadata to config: %v\n", err)
 		}
 		cache[name] = meta
 		return meta, nil

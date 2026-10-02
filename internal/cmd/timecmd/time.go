@@ -227,7 +227,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) 
 				output.Table(cmd.OutOrStdout(), nil, worklogRows(rows))
 			default:
 				output.Table(cmd.OutOrStdout(),
-					[]string{"DATE", "INTERVAL", "HOURS", "WORK TYPE", "AUTHOR"},
+					[]string{"DATE", "FROM–TO", "HOURS", "WORK TYPE", "AUTHOR"},
 					worklogRows(rows))
 			}
 			return nil

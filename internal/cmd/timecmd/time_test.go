@@ -404,7 +404,7 @@ func TestListRendersTable(t *testing.T) {
 		t.Fatalf("list error = %v", err)
 	}
 	for _, want := range []string{
-		"DATE", "INTERVAL", "HOURS", "WORK TYPE", "AUTHOR",
+		"DATE", "FROM–TO", "HOURS", "WORK TYPE", "AUTHOR",
 		"02-10-2026", "10:00–12:00", "2", "Dev", "Ann",
 	} {
 		if !strings.Contains(out, want) {

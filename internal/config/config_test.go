@@ -98,6 +98,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 }
 
 func TestResolveMissingProfile(t *testing.T) {
+	// Clear env so the error path isn't masked by env-only synthesis.
+	t.Setenv("PLANFIX_DOMAIN", "")
+	t.Setenv("PLANFIX_TOKEN", "")
 	c := &Config{Profiles: map[string]*Profile{}}
 	if _, err := Resolve(c, "nope"); err == nil {
 		t.Fatal("expected error for missing profile")
@@ -106,9 +109,33 @@ func TestResolveMissingProfile(t *testing.T) {
 
 func TestResolveNilProfile(t *testing.T) {
 	// A YAML entry like `default:` unmarshals to a nil pointer.
+	t.Setenv("PLANFIX_DOMAIN", "")
+	t.Setenv("PLANFIX_TOKEN", "")
 	c := &Config{Profiles: map[string]*Profile{"default": nil}}
 	if _, err := Resolve(c, "default"); err == nil {
 		t.Fatal("expected error for nil profile entry")
+	}
+}
+
+func TestResolveEnvOnlyNoProfile(t *testing.T) {
+	t.Setenv("PLANFIX_DOMAIN", "env.planfix.ru")
+	t.Setenv("PLANFIX_TOKEN", "env-token")
+	c := &Config{Profiles: map[string]*Profile{}}
+	p, err := Resolve(c, "default")
+	if err != nil {
+		t.Fatalf("env-only resolve must succeed, got %v", err)
+	}
+	if p.Domain != "env.planfix.ru" || p.Token != "env-token" {
+		t.Fatalf("want env credentials, got %+v", p)
+	}
+}
+
+func TestResolveEnvIncompleteNoProfile(t *testing.T) {
+	t.Setenv("PLANFIX_DOMAIN", "env.planfix.ru")
+	t.Setenv("PLANFIX_TOKEN", "")
+	c := &Config{Profiles: map[string]*Profile{}}
+	if _, err := Resolve(c, "default"); err == nil {
+		t.Fatal("expected error when env is incomplete and profile is missing")
 	}
 }
 

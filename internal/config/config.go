@@ -105,17 +105,24 @@ func Save(path string, c *Config) error {
 
 // Resolve returns the profile with env overrides applied
 // (PLANFIX_DOMAIN, PLANFIX_TOKEN override file values).
+// A missing profile is synthesized from env when both variables are set,
+// so env-only auth (CI/agents) works without a config file.
 func Resolve(c *Config, name string) (*Profile, error) {
+	envDomain := os.Getenv("PLANFIX_DOMAIN")
+	envToken := os.Getenv("PLANFIX_TOKEN")
 	p, ok := c.Profiles[name]
 	if !ok || p == nil {
+		if envDomain != "" && envToken != "" {
+			return &Profile{Domain: envDomain, Token: envToken}, nil
+		}
 		return nil, fmt.Errorf("profile %q not found; run `planfix auth login`", name)
 	}
 	out := *p
-	if d := os.Getenv("PLANFIX_DOMAIN"); d != "" {
-		out.Domain = d
+	if envDomain != "" {
+		out.Domain = envDomain
 	}
-	if t := os.Getenv("PLANFIX_TOKEN"); t != "" {
-		out.Token = t
+	if envToken != "" {
+		out.Token = envToken
 	}
 	return &out, nil
 }

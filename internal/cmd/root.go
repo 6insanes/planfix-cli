@@ -9,8 +9,10 @@ import (
 	"planfix-cli/internal/buildinfo"
 	"planfix-cli/internal/cmd/auth"
 	"planfix-cli/internal/cmd/comment"
+	"planfix-cli/internal/cmd/project"
 	"planfix-cli/internal/cmd/task"
 	"planfix-cli/internal/cmd/timecmd"
+	"planfix-cli/internal/cmd/user"
 	"planfix-cli/internal/config"
 	"planfix-cli/internal/planfix"
 )
@@ -64,6 +66,20 @@ func NewRootCmd() *cobra.Command {
 	}, activeDomain))
 	c.AddCommand(comment.NewCmd(newClient, func() comment.Options {
 		return comment.Options{
+			JSON:   globalOpts.JSON,
+			Fields: globalOpts.Fields,
+			Quiet:  globalOpts.Quiet,
+		}
+	}))
+	c.AddCommand(project.NewCmd(newClient, func() project.Options {
+		return project.Options{
+			JSON:   globalOpts.JSON,
+			Fields: globalOpts.Fields,
+			Quiet:  globalOpts.Quiet,
+		}
+	}))
+	c.AddCommand(user.NewCmd(newClient, func() user.Options {
+		return user.Options{
 			JSON:   globalOpts.JSON,
 			Fields: globalOpts.Fields,
 			Quiet:  globalOpts.Quiet,

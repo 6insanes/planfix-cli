@@ -80,14 +80,15 @@ func TestDoPingWrapsHint(t *testing.T) {
 	}
 }
 
-// executeRoot runs the package-level root command tree.
+// executeRoot runs an isolated root command tree and returns its output.
 func executeRoot(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	root := NewRootCmd()
 	buf := new(bytes.Buffer)
-	rootCmd.SetOut(buf)
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs(args)
-	err := rootCmd.Execute()
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetArgs(args)
+	err := root.Execute()
 	return buf.String(), err
 }
 

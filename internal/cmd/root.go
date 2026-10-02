@@ -23,8 +23,9 @@ type GlobalOpts struct {
 // globalOpts backs the persistent flags; sibling commands in this package read it directly.
 var globalOpts GlobalOpts
 
-// NewRootCmd builds the root command with global flags registered.
-// Every call returns an isolated command tree, so tests never share state.
+// NewRootCmd builds the root command with global flags and the auth/ping
+// subcommands registered. Every call returns an isolated command tree,
+// so tests never share state.
 func NewRootCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:           "planfix",
@@ -43,22 +44,19 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVar(&globalOpts.Fields, "fields", "", "comma-separated fields to request/show")
 	pf.BoolVarP(&globalOpts.Quiet, "quiet", "q", false, "print only the id / drop table header")
 	pf.StringVar(&globalOpts.Profile, "profile", "", "config profile name")
-	return c
-}
-
-// rootCmd is the process-wide tree; subcommands added in this package register onto it.
-var rootCmd = NewRootCmd()
-
-func init() {
-	rootCmd.AddCommand(auth.NewCmd(func() string {
+	c.AddCommand(auth.NewCmd(func() string {
 		cfg, err := config.Load(config.ResolvePath())
 		if err != nil {
 			return "default"
 		}
 		return config.ResolveProfileName(globalOpts.Profile, cfg)
 	}))
-	rootCmd.AddCommand(pingCmd)
+	c.AddCommand(newPingCmd())
+	return c
 }
+
+// rootCmd is the process-wide tree used by Execute.
+var rootCmd = NewRootCmd()
 
 // newClient loads the active profile and builds an API client for it.
 func newClient() (*planfix.Client, error) {

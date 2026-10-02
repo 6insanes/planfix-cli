@@ -66,8 +66,10 @@ func TestMask(t *testing.T) {
 		{"", "****"},
 		{"a", "****"},
 		{"abcd", "****"},
-		{"abcde", "ab****de"},
+		{"abcde", "****"},
 		{"tokensecret1234", "to****34"},
+		{"日本語テストの秘密", "日本****秘密"}, // 8 runes, 24 bytes
+		{"日本語", "****"},           // 3 runes, 9 bytes: too few runes to reveal
 	}
 	for _, tt := range tests {
 		if got := mask(tt.in); got != tt.want {
@@ -283,6 +285,34 @@ func TestStatusPingFailureCarriesHint(t *testing.T) {
 	}
 	if !strings.Contains(out, "profile: default") {
 		t.Errorf("profile info should print before the ping failure:\n%s", out)
+	}
+}
+
+func TestStatusRejectsEmptyCredentials(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yml")
+	setConfigEnv(t, path)
+	seed := &config.Config{
+		CurrentProfile: "default",
+		Profiles: map[string]*config.Profile{
+			"default": {Domain: "example.planfix.ru", Token: ""},
+		},
+	}
+	if err := config.Save(path, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "", "status")
+	if err == nil {
+		t.Fatal("status error = nil, want rejection of empty credentials")
+	}
+	if !strings.Contains(err.Error(), "empty domain or token") {
+		t.Errorf("error %q does not mention empty credentials", err)
+	}
+	if !strings.Contains(err.Error(), "auth login") {
+		t.Errorf("error %q does not suggest `planfix auth login`", err)
+	}
+	if strings.Contains(out, "profile:") {
+		t.Errorf("status header printed before credential rejection:\n%s", out)
 	}
 }
 

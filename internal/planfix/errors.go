@@ -2,6 +2,7 @@ package planfix
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"unicode/utf8"
 )
@@ -39,6 +40,16 @@ func (e *APIError) Hint() string {
 	default:
 		return ""
 	}
+}
+
+// HintErr returns the actionable hint when err wraps an *APIError
+// (via errors.As), or "" otherwise.
+func HintErr(err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Hint()
+	}
+	return ""
 }
 
 // ParseError turns a response body into *APIError, or nil on success.

@@ -1,6 +1,8 @@
 package planfix
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -66,6 +68,28 @@ func TestParseErrorTruncatesOnRuneBoundary(t *testing.T) {
 	}
 	if n := utf8.RuneCountInString(strings.TrimSuffix(e.Message, "...")); n > 200 {
 		t.Fatalf("truncated message has %d runes, want <= 200", n)
+	}
+}
+
+func TestHintErr(t *testing.T) {
+	if got := HintErr(nil); got != "" {
+		t.Errorf("HintErr(nil) = %q, want empty", got)
+	}
+	if got := HintErr(errors.New("plain")); got != "" {
+		t.Errorf("HintErr(plain) = %q, want empty", got)
+	}
+	apiErr := &APIError{Code: 1, Message: "token not found"}
+	if got := HintErr(apiErr); !strings.Contains(got, "auth login") {
+		t.Errorf("HintErr(APIError) = %q, want auth login hint", got)
+	}
+	// Wrapped errors must still surface the hint (errors.As, not type assert).
+	wrapped := fmt.Errorf("ping failed: %w", fmt.Errorf("inner: %w", apiErr))
+	if got := HintErr(wrapped); !strings.Contains(got, "auth login") {
+		t.Errorf("HintErr(wrapped) = %q, want auth login hint", got)
+	}
+	// Unknown codes hint nothing.
+	if got := HintErr(&APIError{Code: 999}); got != "" {
+		t.Errorf("HintErr(code=999) = %q, want empty", got)
 	}
 }
 

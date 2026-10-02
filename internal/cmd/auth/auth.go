@@ -90,6 +90,9 @@ func newStatusCmd(resolveName func() string) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if p.Domain == "" || p.Token == "" {
+				return fmt.Errorf("profile %q has empty domain or token; run `planfix auth login`", name)
+			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "profile: %s\n", name)
 			fmt.Fprintf(out, "domain:  %s\n", p.Domain)
@@ -99,10 +102,8 @@ func newStatusCmd(resolveName func() string) *cobra.Command {
 				return err
 			}
 			if _, err := c.JSON(cmd.Context(), http.MethodGet, "/ping", nil); err != nil {
-				if apiErr, ok := err.(*planfix.APIError); ok {
-					if h := apiErr.Hint(); h != "" {
-						return fmt.Errorf("%w (%s)", apiErr, h)
-					}
+				if h := planfix.HintErr(err); h != "" {
+					return fmt.Errorf("%w (%s)", err, h)
 				}
 				return err
 			}
@@ -139,13 +140,14 @@ func newLogoutCmd(resolveName func() string) *cobra.Command {
 	}
 }
 
-// promptCredentials fills in missing domain/token via stdin prompts.
+// promptCredentials fills in missing domain/token via stdin prompts,
+// written to stderr so stdout stays machine-readable.
 // The token is hidden when stdin is a terminal.
 func promptCredentials(cmd *cobra.Command, domain, token string) (string, string, error) {
-	stdout := cmd.OutOrStdout()
+	prompt := cmd.ErrOrStderr()
 	rdr := bufio.NewReader(cmd.InOrStdin())
 	if domain == "" {
-		fmt.Fprint(stdout, "Domain (e.g. example.planfix.ru): ")
+		fmt.Fprint(prompt, "Domain (e.g. example.planfix.ru): ")
 		line, err := readLine(rdr)
 		if err != nil {
 			return "", "", fmt.Errorf("read domain: %w", err)
@@ -156,10 +158,10 @@ func promptCredentials(cmd *cobra.Command, domain, token string) (string, string
 		}
 	}
 	if token == "" {
-		fmt.Fprint(stdout, "Token: ")
+		fmt.Fprint(prompt, "Token: ")
 		if f, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 			b, err := term.ReadPassword(int(f.Fd()))
-			fmt.Fprintln(stdout)
+			fmt.Fprintln(prompt)
 			if err != nil {
 				return "", "", fmt.Errorf("read token: %w", err)
 			}
@@ -187,10 +189,15 @@ func readLine(r *bufio.Reader) (string, error) {
 	return line, nil
 }
 
-// mask hides all but the first and last two characters of a secret.
+// mask hides all but the first and last two runes of a secret.
+// Secrets shorter than eight bytes (or fewer than five runes) are fully hidden.
 func mask(s string) string {
-	if len(s) <= 4 {
+	if len(s) < 8 {
 		return "****"
 	}
-	return s[:2] + "****" + s[len(s)-2:]
+	r := []rune(s)
+	if len(r) < 5 {
+		return "****"
+	}
+	return string(r[:2]) + "****" + string(r[len(r)-2:])
 }

@@ -8,6 +8,7 @@ import (
 
 	"planfix-cli/internal/buildinfo"
 	"planfix-cli/internal/cmd/auth"
+	"planfix-cli/internal/cmd/task"
 	"planfix-cli/internal/config"
 	"planfix-cli/internal/planfix"
 )
@@ -23,9 +24,9 @@ type GlobalOpts struct {
 // globalOpts backs the persistent flags; sibling commands in this package read it directly.
 var globalOpts GlobalOpts
 
-// NewRootCmd builds the root command with global flags and the auth/ping
-// subcommands registered. Every call returns an isolated command tree,
-// so tests never share state.
+// NewRootCmd builds the root command with global flags and the
+// auth/ping/task subcommands registered. Every call returns an isolated
+// command tree, so tests never share state.
 func NewRootCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:           "planfix",
@@ -52,6 +53,13 @@ func NewRootCmd() *cobra.Command {
 		return config.ResolveProfileName(globalOpts.Profile, cfg)
 	}))
 	c.AddCommand(newPingCmd())
+	c.AddCommand(task.NewCmd(newClient, func() task.Options {
+		return task.Options{
+			JSON:   globalOpts.JSON,
+			Fields: globalOpts.Fields,
+			Quiet:  globalOpts.Quiet,
+		}
+	}))
 	return c
 }
 

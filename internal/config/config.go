@@ -67,7 +67,7 @@ func Load(path string) (*Config, error) {
 		if os.IsNotExist(err) {
 			return c, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
@@ -87,8 +87,17 @@ func Save(path string, c *Config) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -98,7 +107,7 @@ func Save(path string, c *Config) error {
 // (PLANFIX_DOMAIN, PLANFIX_TOKEN override file values).
 func Resolve(c *Config, name string) (*Profile, error) {
 	p, ok := c.Profiles[name]
-	if !ok {
+	if !ok || p == nil {
 		return nil, fmt.Errorf("profile %q not found; run `planfix auth login`", name)
 	}
 	out := *p

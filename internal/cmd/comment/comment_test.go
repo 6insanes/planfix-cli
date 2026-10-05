@@ -3,6 +3,7 @@ package comment
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -59,7 +60,7 @@ func TestNewCmdListsSubcommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help error = %v", err)
 	}
-	for _, want := range []string{"list", "add"} {
+	for _, want := range []string{"list", "add", "edit", "delete"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("comment help missing %q:\n%s", want, out)
 		}
@@ -292,5 +293,193 @@ func TestAddRejectsInvalidID(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid task id") {
 		t.Errorf("error = %q, want invalid task id", err)
+	}
+}
+
+// stubComment serves GET /comment/10 as a comment on taskID and answers
+// any mutation with {"result":"success"}.
+func stubComment(taskID int, gotMethod, gotPath *string, body *map[string]any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = fmt.Fprintf(w, `{"result":"success","comment":{"id":10,"task":{"id":%d}}}`, taskID)
+			return
+		}
+		*gotMethod = r.Method
+		*gotPath = r.URL.Path
+		if body != nil {
+			_ = jsonDecode(r, body)
+		}
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}
+}
+
+func TestEditBodyUpdatesComment(t *testing.T) {
+	var gotMethod, gotPath string
+	var body map[string]any
+	srv := httptest.NewServer(stubComment(1, &gotMethod, &gotPath, &body))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{})
+	out, err := exec(t, cmd, "edit", "1", "10", "--body", "new text")
+	if err != nil {
+		t.Fatalf("edit error = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/task/1/comments/10" {
+		t.Errorf("request = %s %s, want POST /task/1/comments/10", gotMethod, gotPath)
+	}
+	if body["description"] != "new text" {
+		t.Errorf("body description = %v, want new text", body["description"])
+	}
+	if !strings.Contains(out, "Updated comment 10") {
+		t.Errorf("output = %q, want \"Updated comment 10\"", out)
+	}
+}
+
+func TestEditReadsStdinWhenNoBody(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(stubComment(1, new(string), new(string), &body))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{})
+	cmd.SetIn(strings.NewReader("piped text\n"))
+	if _, err := exec(t, cmd, "edit", "1", "10"); err != nil {
+		t.Fatalf("edit error = %v", err)
+	}
+	if body["description"] != "piped text\n" {
+		t.Errorf("body description = %q, want %q", body["description"], "piped text\n")
+	}
+}
+
+func TestEditRejectsForeignComment(t *testing.T) {
+	var mutated bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			mutated = true
+			t.Error("mutation must not be called for a foreign comment")
+		}
+		_, _ = w.Write([]byte(`{"result":"success","comment":{"id":10,"task":{"id":2}}}`))
+	}))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{})
+	_, err := exec(t, cmd, "edit", "1", "10", "--body", "hi")
+	if err == nil {
+		t.Fatal("edit foreign comment: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "not a comment on task 1") {
+		t.Errorf("error = %q, want task mismatch", err)
+	}
+	if mutated {
+		t.Error("server saw a mutation")
+	}
+}
+
+func TestEditRejectsInvalidCommentID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("server must not be called for invalid id")
+	}))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{})
+	_, err := exec(t, cmd, "edit", "1", "abc", "--body", "hi")
+	if err == nil {
+		t.Fatal("edit with invalid comment id: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "invalid comment id") {
+		t.Errorf("error = %q, want invalid comment id", err)
+	}
+}
+
+func TestEditJSONFallsBackToIDEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"result":"success","comment":{"id":10,"task":{"id":1}}}`))
+			return
+		}
+	}))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{JSON: true})
+	out, err := exec(t, cmd, "edit", "1", "10", "--body", "hi")
+	if err != nil {
+		t.Fatalf("edit error = %v", err)
+	}
+	if !strings.Contains(out, `"id": 10`) {
+		t.Errorf("json output = %q, want id envelope", out)
+	}
+}
+
+func TestDeleteChecksTaskThenDeletes(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(stubComment(1, &gotMethod, &gotPath, nil))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{})
+	out, err := exec(t, cmd, "delete", "1", "10")
+	if err != nil {
+		t.Fatalf("delete error = %v", err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/comment/10" {
+		t.Errorf("request = %s %s, want DELETE /comment/10", gotMethod, gotPath)
+	}
+	if !strings.Contains(out, "Deleted comment 10") {
+		t.Errorf("output = %q, want \"Deleted comment 10\"", out)
+	}
+}
+
+func TestDeleteRejectsForeignComment(t *testing.T) {
+	var mutated bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			mutated = true
+			t.Error("delete must not be called for a foreign comment")
+		}
+		_, _ = w.Write([]byte(`{"result":"success","comment":{"id":10,"task":{"id":2}}}`))
+	}))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{})
+	_, err := exec(t, cmd, "delete", "1", "10")
+	if err == nil {
+		t.Fatal("delete foreign comment: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "not a comment on task 1") {
+		t.Errorf("error = %q, want task mismatch", err)
+	}
+	if mutated {
+		t.Error("server saw a mutation")
+	}
+}
+
+func TestDeleteQuietPrintsIDOnly(t *testing.T) {
+	srv := httptest.NewServer(stubComment(1, new(string), new(string), nil))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{Quiet: true})
+	out, err := exec(t, cmd, "delete", "1", "10")
+	if err != nil {
+		t.Fatalf("delete error = %v", err)
+	}
+	if out != "10\n" {
+		t.Errorf("quiet output = %q, want \"10\\n\"", out)
+	}
+}
+
+func TestDeleteRejectsInvalidIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("server must not be called for invalid id")
+	}))
+	defer srv.Close()
+
+	cmd := testCmd(srv, Options{})
+	for _, args := range [][]string{{"abc", "10"}, {"1", "abc"}, {"1", "0"}} {
+		_, err := exec(t, cmd, append([]string{"delete"}, args...)...)
+		if err == nil {
+			t.Errorf("delete %v: error = nil, want failure", args)
+			continue
+		}
+		if !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("delete %v: error = %q, want invalid id", args, err)
+		}
 	}
 }

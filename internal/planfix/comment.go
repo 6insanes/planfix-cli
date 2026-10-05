@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -32,6 +33,7 @@ type Comment struct {
 	Type      string    `json:"type,omitempty"`
 	Timestamp TimePoint `json:"dateTime,omitempty"`
 	Author    PersonRef `json:"owner,omitempty"`
+	Task      *TaskRef  `json:"task,omitempty"`
 }
 
 // CommentList is the POST /task/{id}/comments/list payload.
@@ -64,6 +66,46 @@ func (c *Client) listCommentsPage(ctx context.Context, taskID int, fields string
 		body["fields"] = fields
 	}
 	return c.JSON(ctx, http.MethodPost, fmt.Sprintf("/task/%d/comments/list", taskID), body)
+}
+
+// GetComment fetches one comment by id. An empty fields omits the
+// "fields" query parameter.
+func (c *Client) GetComment(ctx context.Context, commentID int, fields string) (*Comment, []byte, error) {
+	path := fmt.Sprintf("/comment/%d", commentID)
+	if fields != "" {
+		path += "?" + url.Values{"fields": {fields}}.Encode()
+	}
+	raw, err := c.JSON(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	var envelope struct {
+		Comment Comment `json:"comment"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, raw, err
+	}
+	return &envelope.Comment, raw, nil
+}
+
+// UpdateComment replaces a comment text on a task. silent updates the
+// comment without notifications (the silent=true query parameter).
+func (c *Client) UpdateComment(ctx context.Context, taskID, commentID int, text string, silent bool) ([]byte, error) {
+	path := fmt.Sprintf("/task/%d/comments/%d", taskID, commentID)
+	if silent {
+		path += "?silent=true"
+	}
+	return c.JSON(ctx, http.MethodPost, path, map[string]any{"description": text})
+}
+
+// DeleteComment deletes a comment by id. silent deletes the comment
+// without notifications (the silent=true query parameter).
+func (c *Client) DeleteComment(ctx context.Context, commentID int, silent bool) ([]byte, error) {
+	path := fmt.Sprintf("/comment/%d", commentID)
+	if silent {
+		path += "?silent=true"
+	}
+	return c.JSON(ctx, http.MethodDelete, path, nil)
 }
 
 // AddComment posts a text comment and returns its id. silent adds the

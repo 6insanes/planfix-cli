@@ -31,7 +31,7 @@ Or via env (no config file):
 ## Commands
 
     planfix task list|view|create|update|open
-    planfix comment list|add
+    planfix comment list|add|edit|delete
     planfix time add|list
     planfix project list
     planfix user list
@@ -39,6 +39,12 @@ Or via env (no config file):
     planfix auth login|status|logout
 
 Global flags: `--json`, `--fields`, `-q`, `--profile`.
+
+### Comments
+
+    planfix comment add 2276867 --body "looks good"
+    planfix comment edit 2276867 36742694 --body "updated text"
+    planfix comment delete 2276867 36742694
 
 ### Log time
 

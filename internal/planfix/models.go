@@ -88,6 +88,12 @@ type ProjectRef struct {
 	Name string `json:"name,omitempty"`
 }
 
+// TaskRef is a nested task pointer on a comment.
+type TaskRef struct {
+	ID   int    `json:"id"`
+	Name string `json:"name,omitempty"`
+}
+
 // Task is a Planfix task (subset of fields the CLI uses).
 type Task struct {
 	ID          int         `json:"id"`

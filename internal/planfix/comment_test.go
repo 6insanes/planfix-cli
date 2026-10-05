@@ -152,3 +152,183 @@ func TestAddCommentErrorReturnsNilRaw(t *testing.T) {
 		t.Errorf("id/raw = %d/%v, want 0/nil on error", id, raw)
 	}
 }
+
+func TestGetComment(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"result":"success","comment":{
+			"id":10,"description":"hi","task":{"id":1,"name":"T"},
+			"owner":{"id":"user:3","name":"Ann"}
+		}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	cm, raw, err := c.GetComment(context.Background(), 10, "id,task")
+	if err != nil {
+		t.Fatalf("GetComment() error = %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/rest/comment/10" {
+		t.Errorf("request = %s %s, want GET /rest/comment/10", gotMethod, gotPath)
+	}
+	if !strings.Contains(gotQuery, "fields=") {
+		t.Errorf("query = %q, want fields", gotQuery)
+	}
+	if cm.ID != 10 || cm.Text != "hi" || cm.Task == nil || cm.Task.ID != 1 || cm.Task.Name != "T" {
+		t.Errorf("comment = %+v", cm)
+	}
+	if cm.Author != (PersonRef{ID: 3, Type: "user", Name: "Ann"}) {
+		t.Errorf("author = %+v", cm.Author)
+	}
+	if !strings.Contains(string(raw), `"comment"`) {
+		t.Errorf("raw = %s", raw)
+	}
+}
+
+func TestGetCommentOmitsEmptyFields(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"result":"success","comment":{"id":10}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, _, err := c.GetComment(context.Background(), 10, ""); err != nil {
+		t.Fatalf("GetComment() error = %v", err)
+	}
+	if gotQuery != "" {
+		t.Errorf("query = %q, want empty", gotQuery)
+	}
+}
+
+func TestUpdateComment(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		b, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(b, &body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	raw, err := c.UpdateComment(context.Background(), 1, 10, "new text", true)
+	if err != nil {
+		t.Fatalf("UpdateComment() error = %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/rest/task/1/comments/10" {
+		t.Errorf("request = %s %s, want POST /rest/task/1/comments/10", gotMethod, gotPath)
+	}
+	if gotQuery != "silent=true" {
+		t.Errorf("query = %q, want silent=true", gotQuery)
+	}
+	if body["description"] != "new text" {
+		t.Errorf("body description = %v, want new text", body["description"])
+	}
+	if !strings.Contains(string(raw), `"result"`) {
+		t.Errorf("raw = %s", raw)
+	}
+}
+
+func TestUpdateCommentOmitsSilentWhenFalse(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.UpdateComment(context.Background(), 1, 10, "hi", false); err != nil {
+		t.Fatalf("UpdateComment() error = %v", err)
+	}
+	if gotQuery != "" {
+		t.Errorf("query = %q, want empty", gotQuery)
+	}
+}
+
+func TestDeleteComment(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	raw, err := c.DeleteComment(context.Background(), 10, false)
+	if err != nil {
+		t.Fatalf("DeleteComment() error = %v", err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/rest/comment/10" {
+		t.Errorf("request = %s %s, want DELETE /rest/comment/10", gotMethod, gotPath)
+	}
+	if gotQuery != "" {
+		t.Errorf("query = %q, want empty", gotQuery)
+	}
+	if !strings.Contains(string(raw), `"result"`) {
+		t.Errorf("raw = %s", raw)
+	}
+}
+
+func TestDeleteCommentSilent(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, err := c.DeleteComment(context.Background(), 10, true); err != nil {
+		t.Fatalf("DeleteComment() error = %v", err)
+	}
+	if gotQuery != "silent=true" {
+		t.Errorf("query = %q, want silent=true", gotQuery)
+	}
+}
+
+func TestUpdateCommentErrorReturnsNilRaw(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"result":"fail","code":5000,"error":"Comment not found by id - 10"}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	raw, err := c.UpdateComment(context.Background(), 1, 10, "hi", false)
+	if err == nil {
+		t.Fatal("UpdateComment() error = nil, want API error")
+	}
+	if raw != nil {
+		t.Errorf("raw = %v, want nil on error", raw)
+	}
+}
+
+func TestDeleteCommentErrorReturnsNilRaw(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"result":"fail","code":5000,"error":"Comment not found by id - 10"}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	raw, err := c.DeleteComment(context.Background(), 10, false)
+	if err == nil {
+		t.Fatal("DeleteComment() error = nil, want API error")
+	}
+	if raw != nil {
+		t.Errorf("raw = %v, want nil on error", raw)
+	}
+}

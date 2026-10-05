@@ -29,7 +29,7 @@ func TestJSONSuccess(t *testing.T) {
 		if r.URL.Path != "/rest/task/1" {
 			t.Errorf("path = %q", r.URL.Path)
 		}
-		w.Write([]byte(`{"result":"success","task":{"id":1}}`))
+		_, _ = w.Write([]byte(`{"result":"success","task":{"id":1}}`))
 	}))
 	defer srv.Close()
 
@@ -45,7 +45,7 @@ func TestJSONSuccess(t *testing.T) {
 
 func TestJSONFailureEnvelope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"result":"failure","code":5,"message":"Access denied"}`))
+		_, _ = w.Write([]byte(`{"result":"failure","code":5,"message":"Access denied"}`))
 	}))
 	defer srv.Close()
 
@@ -68,7 +68,7 @@ func TestJSONPostMarshalsBody(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
 			t.Errorf("decode request body: %v", err)
 		}
-		w.Write([]byte(`{"result":"success"}`))
+		_, _ = w.Write([]byte(`{"result":"success"}`))
 	}))
 	defer srv.Close()
 
@@ -91,7 +91,7 @@ func TestDoNilBodyOmitsContentType(t *testing.T) {
 	var contentType string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		contentType = r.Header.Get("Content-Type")
-		w.Write([]byte(`{"result":"success"}`))
+		_, _ = w.Write([]byte(`{"result":"success"}`))
 	}))
 	defer srv.Close()
 
@@ -100,8 +100,8 @@ func TestDoNilBodyOmitsContentType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
 	if contentType != "" {
 		t.Fatalf("Content-Type = %q, want empty for nil body", contentType)
 	}
@@ -161,7 +161,7 @@ func TestNewRejectsEmptyDomain(t *testing.T) {
 
 func TestDoCancelledContext(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"result":"success"}`))
+		_, _ = w.Write([]byte(`{"result":"success"}`))
 	}))
 	defer srv.Close()
 

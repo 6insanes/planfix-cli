@@ -72,8 +72,8 @@ func TestListRendersTable(t *testing.T) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		_, _ = w.Write([]byte(`{"result":"success","comments":[
-			{"id":10,"text":"hi there","timestamp":"2026-01-01 10:00","author":{"id":3,"name":"Ann"}},
-			{"id":11,"text":"done","timestamp":"2026-01-02 11:00","author":{"id":4,"name":"Bob"}}
+			{"id":10,"description":"hi there","dateTime":{"date":"01-01-2026","time":"10:00"},"owner":{"id":"user:3","name":"Ann"}},
+			{"id":11,"description":"done","dateTime":{"date":"02-01-2026","time":"11:00"},"owner":{"id":"user:4","name":"Bob"}}
 		]}`))
 	}))
 	defer srv.Close()
@@ -83,10 +83,10 @@ func TestListRendersTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list error = %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/task/1/comment/list" {
-		t.Errorf("request = %s %s, want POST /task/1/comment/list", gotMethod, gotPath)
+	if gotMethod != http.MethodPost || gotPath != "/task/1/comments/list" {
+		t.Errorf("request = %s %s, want POST /task/1/comments/list", gotMethod, gotPath)
 	}
-	for _, want := range []string{"ID", "CREATED", "AUTHOR", "TEXT", "hi there", "Ann", "done", "Bob"} {
+	for _, want := range []string{"ID", "CREATED", "AUTHOR", "TEXT", "hi there", "Ann", "done", "Bob", "01-01-2026 10:00"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("list output missing %q:\n%s", want, out)
 		}
@@ -100,7 +100,7 @@ func TestListRendersTable(t *testing.T) {
 func TestListQuietPrintsIDsOnly(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"result":"success","comments":[
-			{"id":10,"text":"hi"},{"id":11,"text":"done"}
+			{"id":10,"description":"hi"},{"id":11,"description":"done"}
 		]}`))
 	}))
 	defer srv.Close()
@@ -172,11 +172,11 @@ func TestAddBodyPostsComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/task/1/comment" {
-		t.Errorf("request = %s %s, want POST /task/1/comment", gotMethod, gotPath)
+	if gotMethod != http.MethodPost || gotPath != "/task/1/comments/" {
+		t.Errorf("request = %s %s, want POST /task/1/comments/", gotMethod, gotPath)
 	}
-	if body["text"] != "hello world" {
-		t.Errorf("body text = %v, want hello world", body["text"])
+	if body["description"] != "hello world" {
+		t.Errorf("body description = %v, want hello world", body["description"])
 	}
 	if _, present := body["silent"]; present {
 		t.Errorf("body unexpectedly contains silent: %v", body)
@@ -187,8 +187,10 @@ func TestAddBodyPostsComment(t *testing.T) {
 }
 
 func TestAddSilentFlag(t *testing.T) {
+	var gotQuery string
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
 		_ = jsonDecode(r, &body)
 		_, _ = w.Write([]byte(`{"result":"success","id":55}`))
 	}))
@@ -198,8 +200,11 @@ func TestAddSilentFlag(t *testing.T) {
 	if _, err := exec(t, cmd, "add", "1", "--body", "hi", "--silent"); err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	if body["silent"] != true {
-		t.Errorf("body silent = %v, want true", body["silent"])
+	if gotQuery != "silent=true" {
+		t.Errorf("query = %q, want silent=true", gotQuery)
+	}
+	if _, present := body["silent"]; present {
+		t.Errorf("body unexpectedly contains silent: %v", body)
 	}
 }
 
@@ -217,8 +222,8 @@ func TestAddReadsStdinWhenNoBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	if body["text"] != "piped text\n" {
-		t.Errorf("body text = %q, want %q", body["text"], "piped text\n")
+	if body["description"] != "piped text\n" {
+		t.Errorf("body description = %q, want %q", body["description"], "piped text\n")
 	}
 	if !strings.Contains(out, "Added comment 9") {
 		t.Errorf("output = %q, want \"Added comment 9\"", out)

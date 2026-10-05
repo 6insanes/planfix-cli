@@ -32,6 +32,6 @@ func doPing(ctx context.Context, c *planfix.Client, out io.Writer) error {
 	if _, err := c.JSON(ctx, http.MethodGet, "/ping", nil); err != nil {
 		return planfix.WrapHint(err)
 	}
-	fmt.Fprintln(out, "OK")
+	_, _ = fmt.Fprintln(out, "OK")
 	return nil
 }

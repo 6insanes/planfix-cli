@@ -119,12 +119,20 @@ func TestCreatePostsFlagsAsBody(t *testing.T) {
 	}
 	assignees, _ := body["assignees"].(map[string]any)
 	users, _ := assignees["users"].([]any)
-	if len(users) != 2 {
-		t.Fatalf("body assignees.users = %#v, want two entries", body["assignees"])
+	if len(users) != 1 {
+		t.Fatalf("body assignees.users = %#v, want one entry", body["assignees"])
 	}
 	first, _ := users[0].(map[string]any)
-	if first["type"] != "user" || first["id"] != float64(7) {
-		t.Errorf("first assignee = %#v, want {user 7}", first)
+	if first["id"] != "user:7" {
+		t.Errorf("users[0] = %#v, want id %q", first, "user:7")
+	}
+	groups, _ := assignees["groups"].([]any)
+	if len(groups) != 1 {
+		t.Fatalf("body assignees.groups = %#v, want one entry", body["assignees"])
+	}
+	group, _ := groups[0].(map[string]any)
+	if group["id"] != float64(2) {
+		t.Errorf("groups[0] = %#v, want id 2", group)
 	}
 }
 

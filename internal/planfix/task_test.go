@@ -16,7 +16,7 @@ func TestGetTask(t *testing.T) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		gotFields = r.URL.Query().Get("fields")
-		_, _ = w.Write([]byte(`{"result":"success","task":{"id":7,"name":"Do thing","status":{"id":1,"name":"New"},"priority":"high","startDate":"2026-01-01"}}`))
+		_, _ = w.Write([]byte(`{"result":"success","task":{"id":7,"name":"Do thing","status":{"id":1,"name":"New"},"priority":"high","startDate":"2026-01-01","assignees":{"users":[{"id":"user:5","name":"Ann"}]}}}`))
 	}))
 	defer srv.Close()
 
@@ -33,6 +33,9 @@ func TestGetTask(t *testing.T) {
 	}
 	if task.ID != 7 || task.Name != "Do thing" || task.Status.Name != "New" || task.Priority != "high" {
 		t.Errorf("task = %+v", task)
+	}
+	if len(task.Assignees.Users) != 1 || task.Assignees.Users[0] != (PersonRef{ID: 5, Type: "user", Name: "Ann"}) {
+		t.Errorf("assignees = %+v", task.Assignees.Users)
 	}
 	if !strings.Contains(string(raw), `"id":7`) {
 		t.Errorf("raw = %s", raw)
@@ -184,7 +187,7 @@ func TestCreateTask(t *testing.T) {
 		Description: "desc",
 		ProjectID:   3,
 		ParentID:    4,
-		Assignees:   []PersonRef{{Type: "user", ID: 7}},
+		Assignees:   []PersonRef{{Type: "user", ID: 7}, {Type: "group", ID: 3}},
 		StartDate:   "2026-01-01",
 		EndDate:     "2026-01-31",
 	})
@@ -212,8 +215,16 @@ func TestCreateTask(t *testing.T) {
 		t.Fatalf("body assignees.users = %#v, want one entry", body["assignees"])
 	}
 	user, _ := users[0].(map[string]any)
-	if user["type"] != "user" || user["id"] != float64(7) {
-		t.Errorf("assignee = %#v, want {user 7}", user)
+	if user["id"] != "user:7" {
+		t.Errorf("assignee = %#v, want id %q", user, "user:7")
+	}
+	groups, _ := assignees["groups"].([]any)
+	if len(groups) != 1 {
+		t.Fatalf("body assignees.groups = %#v, want one entry", body["assignees"])
+	}
+	group, _ := groups[0].(map[string]any)
+	if group["id"] != float64(3) {
+		t.Errorf("group = %#v, want id 3", group)
 	}
 	if body["startDate"] != "2026-01-01" || body["endDate"] != "2026-01-31" {
 		t.Errorf("body dates = %v/%v", body["startDate"], body["endDate"])
@@ -289,6 +300,13 @@ func TestUpdateTask(t *testing.T) {
 	users, _ := assignees["users"].([]any)
 	if len(users) != 1 {
 		t.Fatalf("body assignees.users = %#v, want one entry", body["assignees"])
+	}
+	user, _ := users[0].(map[string]any)
+	if user["id"] != "contact:2" {
+		t.Errorf("assignee = %#v, want id %q", user, "contact:2")
+	}
+	if _, present := assignees["groups"]; present {
+		t.Errorf("body assignees unexpectedly contains groups: %#v", body["assignees"])
 	}
 	if !strings.Contains(string(raw), `"result"`) {
 		t.Errorf("raw = %s", raw)

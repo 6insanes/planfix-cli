@@ -64,7 +64,7 @@ func newLoginCmd(resolveName func() string) *cobra.Command {
 			if err := config.Save(path, cfg); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Logged in: profile %q, domain %s, token %s\n", name, domain, mask(token))
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in: profile %q, domain %s, token %s\n", name, domain, mask(token))
 			return nil
 		},
 	}
@@ -94,9 +94,9 @@ func newStatusCmd(resolveName func() string) *cobra.Command {
 				return fmt.Errorf("profile %q has empty domain or token; run `planfix auth login`", name)
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "profile: %s\n", name)
-			fmt.Fprintf(out, "domain:  %s\n", p.Domain)
-			fmt.Fprintf(out, "token:   %s\n", mask(p.Token))
+			_, _ = fmt.Fprintf(out, "profile: %s\n", name)
+			_, _ = fmt.Fprintf(out, "domain:  %s\n", p.Domain)
+			_, _ = fmt.Fprintf(out, "token:   %s\n", mask(p.Token))
 			c, err := openClient(p.Domain, p.Token)
 			if err != nil {
 				return err
@@ -104,7 +104,7 @@ func newStatusCmd(resolveName func() string) *cobra.Command {
 			if _, err := c.JSON(cmd.Context(), http.MethodGet, "/ping", nil); err != nil {
 				return planfix.WrapHint(err)
 			}
-			fmt.Fprintln(out, "ping:    OK")
+			_, _ = fmt.Fprintln(out, "ping:    OK")
 			return nil
 		},
 	}
@@ -131,7 +131,7 @@ func newLogoutCmd(resolveName func() string) *cobra.Command {
 			if err := config.Save(path, cfg); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q\n", name)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Removed profile %q\n", name)
 			return nil
 		},
 	}
@@ -144,7 +144,7 @@ func promptCredentials(cmd *cobra.Command, domain, token string) (string, string
 	prompt := cmd.ErrOrStderr()
 	rdr := bufio.NewReader(cmd.InOrStdin())
 	if domain == "" {
-		fmt.Fprint(prompt, "Domain (e.g. example.planfix.ru): ")
+		_, _ = fmt.Fprint(prompt, "Domain (e.g. example.planfix.ru): ")
 		line, err := readLine(rdr)
 		if err != nil {
 			return "", "", fmt.Errorf("read domain: %w", err)
@@ -155,10 +155,10 @@ func promptCredentials(cmd *cobra.Command, domain, token string) (string, string
 		}
 	}
 	if token == "" {
-		fmt.Fprint(prompt, "Token: ")
+		_, _ = fmt.Fprint(prompt, "Token: ")
 		if f, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 			b, err := term.ReadPassword(int(f.Fd()))
-			fmt.Fprintln(prompt)
+			_, _ = fmt.Fprintln(prompt)
 			if err != nil {
 				return "", "", fmt.Errorf("read token: %w", err)
 			}

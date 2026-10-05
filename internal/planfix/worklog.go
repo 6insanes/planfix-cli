@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/6insanes/planfix-cli/internal/config"
@@ -30,16 +32,15 @@ type WorklogRow struct {
 	Author   string
 }
 
-// DataTagEntry is a comment carrying a data tag and its custom field values.
+// DataTagEntry is one data tag entry returned by /datatag/{id}/entry/list.
 type DataTagEntry struct {
-	Comment
-	DataTag struct {
-		ID int `json:"id"`
-	} `json:"dataTag"`
+	Key             int              `json:"key"`
+	CommentID       int              `json:"commentId"`
 	CustomFieldData []map[string]any `json:"customFieldData,omitempty"`
 }
 
-// CreateWorklogEntry writes a data-tag comment carrying the worklog fields.
+// CreateWorklogEntry writes a data tag entry to the task's worklog tag and
+// returns the created entry's key (falling back to its comment id).
 func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *config.WorklogMeta, e WorklogEntry) (int, []byte, error) {
 	if e.WorkTypeKey < 0 {
 		return 0, nil, fmt.Errorf("work type key %d must not be negative", e.WorkTypeKey)
@@ -48,15 +49,16 @@ func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *confi
 		return 0, nil, fmt.Errorf(
 			"work type key %d requested but the account has no work type field", e.WorkTypeKey)
 	}
+	timeValue := any(map[string]any{
+		"from": map[string]any{"time": e.From},
+		"to":   map[string]any{"time": e.To},
+	})
+	if meta.TimeInMinutes {
+		timeValue = minutesBetween(e.From, e.To)
+	}
 	cfd := []map[string]any{
 		{"field": map[string]any{"id": meta.FieldDate}, "value": map[string]any{"date": e.Date}},
-		{
-			"field": map[string]any{"id": meta.FieldTime},
-			"value": map[string]any{
-				"from": map[string]any{"time": e.From},
-				"to":   map[string]any{"time": e.To},
-			},
-		},
+		{"field": map[string]any{"id": meta.FieldTime}, "value": timeValue},
 	}
 	if e.WorkTypeKey > 0 && meta.FieldWorkType > 0 {
 		cfd = append(cfd, map[string]any{
@@ -65,79 +67,137 @@ func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *confi
 		})
 	}
 	body := map[string]any{
-		"type":            "DataTag",
-		"dataTag":         map[string]any{"id": meta.DataTagID},
-		"customFieldData": cfd,
+		"dataTag": map[string]any{"id": meta.DataTagID},
+		"items":   []map[string]any{{"customFieldData": cfd}},
 	}
-	raw, err := c.JSON(ctx, http.MethodPost, fmt.Sprintf("/task/%d/comment", taskID), body)
+	raw, err := c.JSON(ctx, http.MethodPost, fmt.Sprintf("/task/%d/datatags/", taskID), body)
 	if err != nil {
 		return 0, nil, err
 	}
 	var envelope struct {
-		ID int `json:"id"`
+		Keys      []int `json:"keys"`
+		CommentID int   `json:"commentId"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return 0, raw, err
 	}
-	return envelope.ID, raw, nil
+	if len(envelope.Keys) > 0 {
+		return envelope.Keys[0], raw, nil
+	}
+	return envelope.CommentID, raw, nil
 }
 
-// worklogListFields are requested from comment/list so data-tag entries can
-// be identified and parsed.
-const worklogListFields = "id,text,type,dataTag,customFieldData,author,timestamp"
+// worklogEntryFields are requested from /datatag/{id}/entry/list: the
+// entry identity plus the meta's custom fields, which are requested by
+// their numeric field ids.
+func worklogEntryFields(meta *config.WorklogMeta) string {
+	ids := []string{"key", "commentId", strconv.Itoa(meta.FieldDate), strconv.Itoa(meta.FieldTime)}
+	if meta.FieldWorkType != 0 {
+		ids = append(ids, strconv.Itoa(meta.FieldWorkType))
+	}
+	return strings.Join(ids, ",")
+}
 
 // apiDateLayout is the worklog date format (dd-MM-yyyy).
 const apiDateLayout = "02-01-2006"
 
-// ListWorklog returns the task's worklog rows: comments whose data tag is
-// the worklog meta's tag, parsed into date/period/work type. Comments are
-// fetched in pages of commentPageSize until a short page, then rows are
-// sorted by date and start time.
+// ListWorklog returns the task's worklog rows: data tag entries of the
+// meta's tag mapped onto date/period/work type and joined with the authors
+// of their comments. Entries are fetched in pages of commentPageSize until
+// a short page, then rows are sorted by date and start time.
 func (c *Client) ListWorklog(ctx context.Context, taskID int, meta *config.WorklogMeta) ([]WorklogRow, []byte, error) {
+	authors, err := c.commentAuthors(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	entries, raw, err := c.listDataTagEntries(ctx, meta.DataTagID, taskID, worklogEntryFields(meta))
+	if err != nil {
+		return nil, nil, err
+	}
+	rows := make([]WorklogRow, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, worklogRow(e, meta, authors[e.CommentID]))
+	}
+	sortWorklogRows(rows)
+	return rows, raw, nil
+}
+
+// commentAuthors maps comment ids to author names for one task.
+func (c *Client) commentAuthors(ctx context.Context, taskID int) (map[int]string, error) {
+	authors := map[int]string{}
+	for offset := 0; ; offset += commentPageSize {
+		pageRaw, err := c.listCommentsPage(ctx, taskID, "id,owner", offset, commentPageSize)
+		if err != nil {
+			return nil, err
+		}
+		var envelope struct {
+			Comments []Comment `json:"comments"`
+		}
+		if err := json.Unmarshal(pageRaw, &envelope); err != nil {
+			return nil, err
+		}
+		for _, cm := range envelope.Comments {
+			authors[cm.ID] = cm.Author.Name
+		}
+		if len(envelope.Comments) < commentPageSize {
+			break
+		}
+	}
+	return authors, nil
+}
+
+// listDataTagEntries pages through POST /datatag/{id}/entry/list for one
+// task. It returns the typed entries and the raw response body, which is
+// merged verbatim across pages when more than one page is fetched.
+func (c *Client) listDataTagEntries(ctx context.Context, dataTagID, taskID int, fields string) ([]DataTagEntry, []byte, error) {
 	var (
-		comments []DataTagEntry
-		raw      []byte
-		pages    int
+		entries []DataTagEntry
+		raws    []json.RawMessage
+		raw     []byte
+		pages   int
 	)
 	for offset := 0; ; offset += commentPageSize {
-		pageRaw, err := c.listCommentsPage(ctx, taskID, worklogListFields, offset, commentPageSize)
+		body := map[string]any{"offset": offset, "pageSize": commentPageSize, "taskId": taskID}
+		if fields != "" {
+			body["fields"] = fields
+		}
+		pageRaw, err := c.JSON(ctx, http.MethodPost, fmt.Sprintf("/datatag/%d/entry/list", dataTagID), body)
 		if err != nil {
 			return nil, nil, err
 		}
 		var envelope struct {
-			Comments []DataTagEntry `json:"comments"`
+			DataTagEntries []json.RawMessage `json:"dataTagEntries"`
 		}
 		if err := json.Unmarshal(pageRaw, &envelope); err != nil {
 			return nil, pageRaw, err
+		}
+		for _, item := range envelope.DataTagEntries {
+			var e DataTagEntry
+			if err := json.Unmarshal(item, &e); err != nil {
+				return nil, pageRaw, err
+			}
+			entries = append(entries, e)
 		}
 		if pages == 0 {
 			raw = pageRaw
 		}
 		pages++
-		comments = append(comments, envelope.Comments...)
-		if len(envelope.Comments) < commentPageSize {
+		raws = append(raws, envelope.DataTagEntries...)
+		if len(envelope.DataTagEntries) < commentPageSize {
 			break
 		}
 	}
 	if pages > 1 {
 		merged, err := json.Marshal(struct {
-			Result   string         `json:"result"`
-			Comments []DataTagEntry `json:"comments"`
-		}{Result: "success", Comments: comments})
+			Result         string            `json:"result"`
+			DataTagEntries []json.RawMessage `json:"dataTagEntries"`
+		}{Result: "success", DataTagEntries: raws})
 		if err != nil {
 			return nil, raw, err
 		}
 		raw = merged
 	}
-	rows := make([]WorklogRow, 0, len(comments))
-	for _, e := range comments {
-		if e.DataTag.ID != meta.DataTagID {
-			continue
-		}
-		rows = append(rows, worklogRow(e, meta))
-	}
-	sortWorklogRows(rows)
-	return rows, raw, nil
+	return entries, raw, nil
 }
 
 // sortWorklogRows orders rows by calendar date, then by start time.
@@ -160,9 +220,10 @@ func parseWorklogDate(s string) time.Time {
 	return d
 }
 
-// worklogRow maps one data-tag comment's customFieldData onto a WorklogRow.
-func worklogRow(e DataTagEntry, meta *config.WorklogMeta) WorklogRow {
-	row := WorklogRow{Author: e.Author.Name}
+// worklogRow maps one data tag entry's customFieldData onto a WorklogRow.
+func worklogRow(e DataTagEntry, meta *config.WorklogMeta, author string) WorklogRow {
+	row := WorklogRow{Author: author}
+	minutes := 0.0
 	for _, item := range e.CustomFieldData {
 		id := nestedInt(item, "field", "id")
 		value, _ := item["value"].(map[string]any)
@@ -170,13 +231,21 @@ func worklogRow(e DataTagEntry, meta *config.WorklogMeta) WorklogRow {
 		case id == meta.FieldDate && id != 0:
 			row.Date = nestedStr(item, "value", "date")
 		case id == meta.FieldTime && id != 0:
-			row.From = nestedStr(item, "value", "from", "time")
-			row.To = nestedStr(item, "value", "to", "time")
+			if meta.TimeInMinutes {
+				minutes = numberValue(item, "value")
+			} else {
+				row.From = nestedStr(item, "value", "from", "time")
+				row.To = nestedStr(item, "value", "to", "time")
+			}
 		case meta.FieldWorkType != 0 && id == meta.FieldWorkType:
 			row.WorkType = directoryLabel(value)
 		}
 	}
-	row.Hours = hoursBetween(row.From, row.To)
+	if meta.TimeInMinutes {
+		row.Hours = minutes / 60
+	} else {
+		row.Hours = hoursBetween(row.From, row.To)
+	}
 	return row
 }
 
@@ -227,4 +296,22 @@ func hoursBetween(from, to string) float64 {
 		d += 24 * time.Hour
 	}
 	return d.Hours()
+}
+
+// minutesBetween returns the whole minutes between two HH:MM bounds.
+func minutesBetween(from, to string) int {
+	return int(math.Round(hoursBetween(from, to) * 60))
+}
+
+// numberValue reads m[key] as a bare JSON number or numeric string; 0
+// when absent or non-numeric.
+func numberValue(m map[string]any, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case string:
+		f, _ := strconv.ParseFloat(v, 64)
+		return f
+	}
+	return 0
 }

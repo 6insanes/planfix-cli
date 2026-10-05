@@ -35,16 +35,19 @@ func TestMatchName(t *testing.T) {
 
 func TestDiscover(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("method = %s, want GET", r.Method)
-		}
 		switch r.URL.Path {
-		case "/rest/datatag":
+		case "/rest/datatag/list":
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %s, want POST", r.Method)
+			}
 			_, _ = w.Write([]byte(`{"result":"success","dataTags":[
 				{"id":1,"name":"Планируемое время"},
 				{"id":2,"name":"Фактическое время"}
 			]}`))
 		case "/rest/datatag/2":
+			if r.Method != http.MethodGet {
+				t.Errorf("method = %s, want GET", r.Method)
+			}
 			_, _ = w.Write([]byte(`{"result":"success","dataTag":{"id":2,"name":"Фактическое время","fields":[
 				{"id":10,"name":"Дата","type":1},
 				{"id":11,"name":"Время","type":5},
@@ -99,7 +102,7 @@ func TestDiscoverDateIgnoresDecoys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/rest/datatag":
+				case "/rest/datatag/list":
 					_, _ = w.Write([]byte(`{"result":"success","dataTags":[{"id":2,"name":"Фактическое время"}]}`))
 				case "/rest/datatag/2":
 					_, _ = w.Write([]byte(`{"result":"success","dataTag":{"id":2,"name":"Фактическое время","fields":[` +
@@ -130,7 +133,7 @@ func TestDiscoverDateIgnoresDecoys(t *testing.T) {
 func TestDiscoverWrongTypeTimeFallsBackToName(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/rest/datatag":
+		case "/rest/datatag/list":
 			_, _ = w.Write([]byte(`{"result":"success","dataTags":[{"id":2,"name":"Фактическое время"}]}`))
 		case "/rest/datatag/2":
 			_, _ = w.Write([]byte(`{"result":"success","dataTag":{"id":2,"name":"Фактическое время","fields":[
@@ -155,6 +158,79 @@ func TestDiscoverWrongTypeTimeFallsBackToName(t *testing.T) {
 	}
 	if meta.FieldTime != 11 {
 		t.Errorf("FieldTime = %d, want 11 (name-only fallback)", meta.FieldTime)
+	}
+}
+
+func TestDiscoverMinutesTimeField(t *testing.T) {
+	// A worklog tag without a period-of-time field: time is recorded as a
+	// spent-minutes number (the 4px account's schema).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/datatag/list":
+			_, _ = w.Write([]byte(`{"result":"success","dataTags":[{"id":2,"name":"Фактическое время"}]}`))
+		case "/rest/datatag/2":
+			_, _ = w.Write([]byte(`{"result":"success","dataTag":{"id":2,"name":"Фактическое время","fields":[
+				{"id":10,"name":"Дата","type":3},
+				{"id":11,"name":"Минут потрачено","type":1},
+				{"id":12,"name":"Статус","type":8},
+				{"id":13,"name":"Детали работ","type":2}
+			]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := planfix.New("x", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL + "/rest"
+
+	meta, err := Discover(context.Background(), c)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if meta.FieldDate != 10 || meta.FieldTime != 11 {
+		t.Errorf("meta = %+v, want FieldDate 10 and FieldTime 11", meta)
+	}
+	if !meta.TimeInMinutes {
+		t.Errorf("TimeInMinutes = false, want true for %q", "Минут потрачено")
+	}
+	if meta.FieldWorkType != 0 {
+		t.Errorf("FieldWorkType = %d, want 0 (no work-type field)", meta.FieldWorkType)
+	}
+}
+
+func TestDiscoverPeriodTimeFieldWinsOverMinutes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/datatag/list":
+			_, _ = w.Write([]byte(`{"result":"success","dataTags":[{"id":2,"name":"Фактическое время"}]}`))
+		case "/rest/datatag/2":
+			_, _ = w.Write([]byte(`{"result":"success","dataTag":{"id":2,"name":"Фактическое время","fields":[
+				{"id":10,"name":"Дата","type":3},
+				{"id":11,"name":"Минут потрачено","type":1},
+				{"id":12,"name":"Время","type":5}
+			]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := planfix.New("x", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL + "/rest"
+
+	meta, err := Discover(context.Background(), c)
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if meta.FieldTime != 12 || meta.TimeInMinutes {
+		t.Errorf("meta = %+v, want period field 12 without TimeInMinutes", meta)
 	}
 }
 
@@ -184,7 +260,7 @@ func TestDiscoverNoWorklogTag(t *testing.T) {
 func TestDiscoverMissingTimeField(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/rest/datatag":
+		case "/rest/datatag/list":
 			_, _ = w.Write([]byte(`{"result":"success","dataTags":[
 				{"id":2,"name":"Фактическое время"}
 			]}`))

@@ -66,11 +66,15 @@ func ParseError(status int, body []byte) *APIError {
 	var envelope struct {
 		Result  string `json:"result"`
 		Code    int    `json:"code"`
+		Error   string `json:"error"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &envelope); err == nil {
 		if envelope.Result == "failure" || envelope.Code != 0 {
-			msg := envelope.Message
+			msg := envelope.Error
+			if msg == "" {
+				msg = envelope.Message
+			}
 			if msg == "" {
 				msg = "unknown error"
 			}

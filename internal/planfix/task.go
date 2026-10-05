@@ -82,6 +82,28 @@ type UpdateTaskRequest struct {
 	Assignees   []PersonRef
 }
 
+// assigneesBody splits person refs into the wire shape the API expects:
+// user/contact refs under "users" with prefixed ids, group refs under
+// "groups" with plain ids.
+func assigneesBody(refs []PersonRef) map[string]any {
+	var users, groups []PersonRef
+	for _, r := range refs {
+		if r.Type == "group" {
+			groups = append(groups, r)
+		} else {
+			users = append(users, r)
+		}
+	}
+	out := map[string]any{}
+	if len(users) > 0 {
+		out["users"] = users
+	}
+	if len(groups) > 0 {
+		out["groups"] = groups
+	}
+	return out
+}
+
 // CreateTask posts a new task and returns its id.
 func (c *Client) CreateTask(ctx context.Context, req CreateTaskRequest) (int, []byte, error) {
 	body := map[string]any{"name": req.Name}
@@ -95,7 +117,7 @@ func (c *Client) CreateTask(ctx context.Context, req CreateTaskRequest) (int, []
 		body["parent"] = map[string]any{"id": req.ParentID}
 	}
 	if len(req.Assignees) > 0 {
-		body["assignees"] = map[string]any{"users": req.Assignees}
+		body["assignees"] = assigneesBody(req.Assignees)
 	}
 	if req.StartDate != "" {
 		body["startDate"] = req.StartDate
@@ -135,7 +157,7 @@ func (c *Client) UpdateTask(ctx context.Context, id int, req UpdateTaskRequest) 
 		body["status"] = map[string]any{"id": *req.Status}
 	}
 	if len(req.Assignees) > 0 {
-		body["assignees"] = map[string]any{"users": req.Assignees}
+		body["assignees"] = assigneesBody(req.Assignees)
 	}
 	return c.JSON(ctx, http.MethodPost, fmt.Sprintf("/task/%d", id), body)
 }

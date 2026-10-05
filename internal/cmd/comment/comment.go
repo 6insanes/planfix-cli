@@ -23,7 +23,7 @@ type Options struct {
 type ClientFunc func() (*planfix.Client, error)
 
 // defaultListFields is requested when --fields is empty.
-const defaultListFields = "id,text,timestamp,author"
+const defaultListFields = "id,description,dateTime,owner"
 
 // NewCmd builds the comment command group (list and add).
 func NewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
@@ -82,7 +82,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				for _, cm := range list.Comments {
 					rows = append(rows, []string{
 						strconv.Itoa(cm.ID),
-						cm.Timestamp,
+						cm.Timestamp.String(),
 						cm.Author.Name,
 						cm.Text,
 					})

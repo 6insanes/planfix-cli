@@ -18,9 +18,10 @@ func WriteResult(w io.Writer, opts WriteOpts, verb, noun string, id int, raw []b
 	case opts.JSON:
 		return JSON(w, raw)
 	case opts.Quiet:
-		fmt.Fprintln(w, id)
+		_, err := fmt.Fprintln(w, id)
+		return err
 	default:
-		fmt.Fprintf(w, "%s %s %d\n", verb, noun, id)
+		_, err := fmt.Fprintf(w, "%s %s %d\n", verb, noun, id)
+		return err
 	}
-	return nil
 }

@@ -168,7 +168,7 @@ func newOpenCmd(getDomain func() string) *cobra.Command {
 			if domain == "" {
 				return fmt.Errorf("no domain configured; run `planfix auth login`")
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "https://%s/task/%d\n", planfix.NormalizeDomain(domain), id)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "https://%s/task/%d\n", planfix.NormalizeDomain(domain), id)
 			return nil
 		},
 	}

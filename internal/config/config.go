@@ -17,6 +17,9 @@ type WorklogMeta struct {
 	FieldWorkType     int `yaml:"field_work_type,omitempty"`
 	FieldEmployee     int `yaml:"field_employee,omitempty"`
 	WorkTypeDirectory int `yaml:"work_type_directory,omitempty"`
+	// TimeInMinutes marks FieldTime as a spent-minutes number field
+	// instead of a from/to period-of-time field.
+	TimeInMinutes bool `yaml:"time_in_minutes,omitempty"`
 }
 
 // Profile is one named account.
@@ -92,9 +95,9 @@ func Save(path string, c *Config) error {
 		return err
 	}
 	tmp := f.Name()
-	defer os.Remove(tmp)
+	defer func() { _ = os.Remove(tmp) }()
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {

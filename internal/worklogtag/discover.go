@@ -153,6 +153,11 @@ func Discover(ctx context.Context, c *planfix.Client) (*config.WorklogMeta, erro
 		return strings.Contains(n, "время") || strings.Contains(n, "период") ||
 			strings.Contains(n, "time") || strings.Contains(n, "period")
 	}
+	// isMinutesTime matches a spent-minutes number field («Минут потрачено»)
+	// as used by worklog tags without a period-of-time field.
+	isMinutesTime := func(n string) bool {
+		return strings.Contains(n, "минут") || strings.Contains(n, "minute")
+	}
 	isWorkType := func(n string) bool {
 		return strings.Contains(n, "вид") || strings.Contains(n, "work")
 	}
@@ -160,7 +165,11 @@ func Discover(ctx context.Context, c *planfix.Client) (*config.WorklogMeta, erro
 		return strings.Contains(n, "сотрудник") || strings.Contains(n, "employee")
 	}
 
-	meta.FieldTime = pickField(tag.Fields, isTime, typePeriodOfTime, taken).ID
+	if tf := pickField(tag.Fields, isTime, typePeriodOfTime, taken); tf.ID != 0 {
+		meta.FieldTime = tf.ID
+	} else if tf := pickField(tag.Fields, isMinutesTime, 0, taken); tf.ID != 0 {
+		meta.FieldTime, meta.TimeInMinutes = tf.ID, true
+	}
 	wt := pickField(tag.Fields, isWorkType, typeDirectoryEntry, taken)
 	meta.FieldWorkType, meta.WorkTypeDirectory = wt.ID, wt.DirectoryID
 	meta.FieldEmployee = pickField(tag.Fields, isEmployee, typeUsersArray, taken).ID

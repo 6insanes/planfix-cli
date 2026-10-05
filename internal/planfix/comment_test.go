@@ -21,31 +21,34 @@ func TestListComments(t *testing.T) {
 			t.Errorf("decode body: %v", err)
 		}
 		_, _ = w.Write([]byte(`{"result":"success","comments":[
-			{"id":10,"text":"hi","type":"comment","timestamp":"2026-01-01 10:00","author":{"id":3,"name":"Ann"}}
+			{"id":10,"description":"hi","type":"comment","dateTime":{"date":"01-01-2026","time":"10:00"},"owner":{"id":"user:3","name":"Ann"}}
 		]}`))
 	}))
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
-	list, raw, err := c.ListComments(context.Background(), 1, "id,text")
+	list, raw, err := c.ListComments(context.Background(), 1, "id,description")
 	if err != nil {
 		t.Fatalf("ListComments() error = %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/rest/task/1/comment/list" {
-		t.Errorf("request = %s %s, want POST /rest/task/1/comment/list", gotMethod, gotPath)
+	if gotMethod != http.MethodPost || gotPath != "/rest/task/1/comments/list" {
+		t.Errorf("request = %s %s, want POST /rest/task/1/comments/list", gotMethod, gotPath)
 	}
 	if body["offset"] != float64(0) || body["pageSize"] != float64(100) {
 		t.Errorf("body offset/pageSize = %v/%v, want 0/100", body["offset"], body["pageSize"])
 	}
-	if body["fields"] != "id,text" {
-		t.Errorf("body fields = %v, want id,text", body["fields"])
+	if body["fields"] != "id,description" {
+		t.Errorf("body fields = %v, want id,description", body["fields"])
 	}
 	if len(list.Comments) != 1 {
 		t.Fatalf("comments = %+v, want one entry", list.Comments)
 	}
 	cm := list.Comments[0]
-	if cm.ID != 10 || cm.Text != "hi" || cm.Timestamp != "2026-01-01 10:00" || cm.Author.Name != "Ann" {
+	if cm.ID != 10 || cm.Text != "hi" || cm.Timestamp.String() != "01-01-2026 10:00" || cm.Author.Name != "Ann" {
 		t.Errorf("comment = %+v", cm)
+	}
+	if cm.Author != (PersonRef{ID: 3, Type: "user", Name: "Ann"}) {
+		t.Errorf("author = %+v", cm.Author)
 	}
 	if !strings.Contains(string(raw), `"comments"`) {
 		t.Errorf("raw = %s", raw)
@@ -71,11 +74,12 @@ func TestListCommentsOmitsEmptyFields(t *testing.T) {
 }
 
 func TestAddComment(t *testing.T) {
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotQuery string
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
 		b, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(b, &body); err != nil {
 			t.Errorf("decode body: %v", err)
@@ -89,14 +93,17 @@ func TestAddComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddComment() error = %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/rest/task/1/comment" {
-		t.Errorf("request = %s %s, want POST /rest/task/1/comment", gotMethod, gotPath)
+	if gotMethod != http.MethodPost || gotPath != "/rest/task/1/comments/" {
+		t.Errorf("request = %s %s, want POST /rest/task/1/comments/", gotMethod, gotPath)
 	}
-	if body["text"] != "hello" {
-		t.Errorf("body text = %v, want hello", body["text"])
+	if gotQuery != "silent=true" {
+		t.Errorf("query = %q, want silent=true", gotQuery)
 	}
-	if body["silent"] != true {
-		t.Errorf("body silent = %v, want true", body["silent"])
+	if body["description"] != "hello" {
+		t.Errorf("body description = %v, want hello", body["description"])
+	}
+	if _, present := body["silent"]; present {
+		t.Errorf("body unexpectedly contains silent: %v", body)
 	}
 	if id != 55 {
 		t.Errorf("id = %d, want 55", id)
@@ -107,8 +114,10 @@ func TestAddComment(t *testing.T) {
 }
 
 func TestAddCommentOmitsSilentWhenFalse(t *testing.T) {
+	var gotQuery string
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
 		_, _ = w.Write([]byte(`{"result":"success","id":2}`))
@@ -118,6 +127,9 @@ func TestAddCommentOmitsSilentWhenFalse(t *testing.T) {
 	c := newTestClient(t, srv)
 	if _, _, err := c.AddComment(context.Background(), 1, "hi", false); err != nil {
 		t.Fatalf("AddComment() error = %v", err)
+	}
+	if gotQuery != "" {
+		t.Errorf("query = %q, want empty", gotQuery)
 	}
 	if _, present := body["silent"]; present {
 		t.Errorf("body unexpectedly contains silent: %v", body)

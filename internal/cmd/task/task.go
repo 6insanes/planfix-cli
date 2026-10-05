@@ -128,7 +128,7 @@ func newViewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				return output.JSON(cmd.OutOrStdout(), raw)
 			}
 			if opts.Quiet {
-				fmt.Fprintln(cmd.OutOrStdout(), t.ID)
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), t.ID)
 				return nil
 			}
 			var kv [][2]string

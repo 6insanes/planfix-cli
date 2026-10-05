@@ -32,7 +32,7 @@ func TestCreateWorklogEntry(t *testing.T) {
 		if err := json.Unmarshal(b, &body); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":55}`))
 	}))
 	defer srv.Close()
 
@@ -46,19 +46,20 @@ func TestCreateWorklogEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorklogEntry() error = %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/rest/task/1/comment" {
-		t.Errorf("request = %s %s, want POST /rest/task/1/comment", gotMethod, gotPath)
-	}
-	if body["type"] != "DataTag" {
-		t.Errorf("type = %v, want DataTag", body["type"])
+	if gotMethod != http.MethodPost || gotPath != "/rest/task/1/datatags/" {
+		t.Errorf("request = %s %s, want POST /rest/task/1/datatags/", gotMethod, gotPath)
 	}
 	tag, _ := body["dataTag"].(map[string]any)
 	if tag["id"] != float64(123) {
 		t.Errorf("dataTag id = %v, want 123", tag["id"])
 	}
-	cfd, _ := body["customFieldData"].([]any)
+	items, _ := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %#v, want one entry", body["items"])
+	}
+	cfd, _ := items[0].(map[string]any)["customFieldData"].([]any)
 	if len(cfd) != 3 {
-		t.Fatalf("customFieldData len = %d, want 3: %v", len(cfd), body["customFieldData"])
+		t.Fatalf("customFieldData len = %d, want 3: %v", len(cfd), body["items"])
 	}
 	dateItem := cfd[0].(map[string]any)
 	if dateItem["field"].(map[string]any)["id"] != float64(456) {
@@ -87,9 +88,9 @@ func TestCreateWorklogEntry(t *testing.T) {
 		t.Errorf("work type value = %v, want 1", wtVal["id"])
 	}
 	if id != 77 {
-		t.Errorf("id = %d, want 77", id)
+		t.Errorf("id = %d, want 77 (first entry key)", id)
 	}
-	if !strings.Contains(string(raw), `"id":77`) {
+	if !strings.Contains(string(raw), `"commentId":55`) {
 		t.Errorf("raw = %s", raw)
 	}
 }
@@ -101,7 +102,7 @@ func TestCreateWorklogEntryRequiresWorkTypeField(t *testing.T) {
 		calls++
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
-		_, _ = w.Write([]byte(`{"result":"success","id":5}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[5],"commentId":5}`))
 	}))
 	defer srv.Close()
 
@@ -125,7 +126,11 @@ func TestCreateWorklogEntryRequiresWorkTypeField(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateWorklogEntry() error = %v", err)
 	}
-	cfd, _ := body["customFieldData"].([]any)
+	items, _ := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %#v, want one entry", body["items"])
+	}
+	cfd, _ := items[0].(map[string]any)["customFieldData"].([]any)
 	if len(cfd) != 2 {
 		t.Errorf("customFieldData len = %d, want 2 (WorkTypeKey 0)", len(cfd))
 	}
@@ -167,31 +172,61 @@ func TestCreateWorklogEntryAPIErrorReturnsNilRaw(t *testing.T) {
 	}
 }
 
-func TestListWorklog(t *testing.T) {
+func TestCreateWorklogEntryMinutesField(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rest/task/1/comment/list" {
-			t.Errorf("path = %s, want /rest/task/1/comment/list", r.URL.Path)
-		}
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
-		_, _ = w.Write([]byte(`{"result":"success","comments":[
-			{"id":1,"text":"plain comment","type":"comment","author":{"id":3,"name":"Ann"}},
-			{"id":2,"type":"DataTag","dataTag":{"id":999},"author":{"id":4,"name":"Other"},
-			 "customFieldData":[{"field":{"id":456},"value":{"date":"01-10-2026"}}]},
-			{"id":3,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
-			 "customFieldData":[
-				{"field":{"id":456},"value":{"date":"02-10-2026"}},
-				{"field":{"id":789},"value":{"from":{"time":"10:00"},"to":{"time":"12:00"}}},
-				{"field":{"id":101},"value":{"id":1,"name":"Dev"}}
-			]},
-			{"id":4,"type":"DataTag","dataTag":{"id":123},"author":{"id":4,"name":"Bob"},
-			 "customFieldData":[
-				{"field":{"id":456},"value":{"date":"03-10-2026"}},
-				{"field":{"id":789},"value":{"from":{"time":"09:00"},"to":{"time":"09:30"}}},
-				{"field":{"id":101},"value":{"id":7}}
-			]}
-		]}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[7],"commentId":7}`))
+	}))
+	defer srv.Close()
+
+	meta := worklogTestMeta()
+	meta.TimeInMinutes = true
+	c := newTestClient(t, srv)
+	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, meta, WorklogEntry{
+		Date: "02-10-2026", From: "10:00", To: "11:30",
+	}); err != nil {
+		t.Fatalf("CreateWorklogEntry() error = %v", err)
+	}
+	items, _ := body["items"].([]any)
+	cfd, _ := items[0].(map[string]any)["customFieldData"].([]any)
+	if len(cfd) != 2 {
+		t.Fatalf("customFieldData = %v, want 2 items", cfd)
+	}
+	if got := cfd[1].(map[string]any)["value"]; got != float64(90) {
+		t.Errorf("time value = %v, want 90 minutes", got)
+	}
+}
+
+func TestListWorklog(t *testing.T) {
+	var entryBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/task/1/comments/list":
+			_, _ = w.Write([]byte(`{"result":"success","comments":[
+				{"id":30,"owner":{"id":"user:3","name":"Ann"}},
+				{"id":40,"owner":{"id":"user:4","name":"Bob"}}
+			]}`))
+		case "/rest/datatag/123/entry/list":
+			b, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(b, &entryBody)
+			_, _ = w.Write([]byte(`{"result":"success","dataTagEntries":[
+				{"key":1,"commentId":30,"customFieldData":[
+					{"field":{"id":456},"value":{"date":"02-10-2026"}},
+					{"field":{"id":789},"value":{"from":{"time":"10:00"},"to":{"time":"12:00"}}},
+					{"field":{"id":101},"value":{"id":1,"name":"Dev"}}
+				]},
+				{"key":2,"commentId":40,"customFieldData":[
+					{"field":{"id":456},"value":{"date":"03-10-2026"}},
+					{"field":{"id":789},"value":{"from":{"time":"09:00"},"to":{"time":"09:30"}}},
+					{"field":{"id":101},"value":{"id":7}}
+				]}
+			]}`))
+		default:
+			t.Errorf("unexpected path = %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer srv.Close()
 
@@ -200,17 +235,20 @@ func TestListWorklog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorklog() error = %v", err)
 	}
-	fields, _ := body["fields"].(string)
-	for _, want := range []string{"dataTag", "customFieldData", "author"} {
+	fields, _ := entryBody["fields"].(string)
+	for _, want := range []string{"key", "commentId", "456", "789", "101"} {
 		if !strings.Contains(fields, want) {
 			t.Errorf("fields = %q, want mention of %q", fields, want)
 		}
 	}
-	if !strings.Contains(string(raw), `"comments"`) {
+	if entryBody["taskId"] != float64(1) {
+		t.Errorf("entry body taskId = %v, want 1", entryBody["taskId"])
+	}
+	if !strings.Contains(string(raw), `"dataTagEntries"`) {
 		t.Errorf("raw = %s", raw)
 	}
 	if len(rows) != 2 {
-		t.Fatalf("rows = %+v, want 2 entries (plain + foreign tag filtered)", rows)
+		t.Fatalf("rows = %+v, want 2 entries", rows)
 	}
 	r0 := rows[0]
 	if r0.Date != "02-10-2026" || r0.From != "10:00" || r0.To != "12:00" {
@@ -237,9 +275,18 @@ func TestListWorklog(t *testing.T) {
 	}
 }
 
-func TestListWorklogPagesBeyond100Comments(t *testing.T) {
+func TestListWorklogPagesBeyond100Entries(t *testing.T) {
 	var offsets, pageSizes []float64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/task/1/comments/list" {
+			_, _ = w.Write([]byte(`{"result":"success","comments":[]}`))
+			return
+		}
+		if r.URL.Path != "/rest/datatag/123/entry/list" {
+			t.Errorf("unexpected path = %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		var body map[string]any
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
@@ -255,13 +302,13 @@ func TestListWorklogPagesBeyond100Comments(t *testing.T) {
 		parts := make([]string, 0, n)
 		for i := 0; i < n; i++ {
 			parts = append(parts, fmt.Sprintf(
-				`{"id":%d,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+				`{"key":%d,"commentId":0,
 				 "customFieldData":[
 					{"field":{"id":456},"value":{"date":"02-10-2026"}},
 					{"field":{"id":789},"value":{"from":{"time":"10:00"},"to":{"time":"12:00"}}}
 				 ]}`, start+i))
 		}
-		fmt.Fprintf(w, `{"result":"success","comments":[%s]}`, strings.Join(parts, ","))
+		_, _ = fmt.Fprintf(w, `{"result":"success","dataTagEntries":[%s]}`, strings.Join(parts, ","))
 	}))
 	defer srv.Close()
 
@@ -282,13 +329,13 @@ func TestListWorklogPagesBeyond100Comments(t *testing.T) {
 		}
 	}
 	var merged struct {
-		Comments []json.RawMessage `json:"comments"`
+		DataTagEntries []json.RawMessage `json:"dataTagEntries"`
 	}
 	if err := json.Unmarshal(raw, &merged); err != nil {
 		t.Fatalf("raw is not JSON: %v", err)
 	}
-	if len(merged.Comments) != 101 {
-		t.Errorf("raw comments = %d, want 101 (pages merged)", len(merged.Comments))
+	if len(merged.DataTagEntries) != 101 {
+		t.Errorf("raw entries = %d, want 101 (pages merged)", len(merged.DataTagEntries))
 	}
 }
 
@@ -296,18 +343,22 @@ func TestListWorklogSortsByDateAndFrom(t *testing.T) {
 	// Deliberately unordered; a string sort would put 02-10-2026 before
 	// 15-12-2025 even though 2025 comes first chronologically.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"result":"success","comments":[
-			{"id":1,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+		if r.URL.Path == "/rest/task/1/comments/list" {
+			_, _ = w.Write([]byte(`{"result":"success","comments":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"result":"success","dataTagEntries":[
+			{"key":1,"commentId":0,
 			 "customFieldData":[
 				{"field":{"id":456},"value":{"date":"02-10-2026"}},
 				{"field":{"id":789},"value":{"from":{"time":"14:00"},"to":{"time":"15:00"}}}
 			 ]},
-			{"id":2,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+			{"key":2,"commentId":0,
 			 "customFieldData":[
 				{"field":{"id":456},"value":{"date":"15-12-2025"}},
 				{"field":{"id":789},"value":{"from":{"time":"09:00"},"to":{"time":"10:00"}}}
 			 ]},
-			{"id":3,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
+			{"key":3,"commentId":0,
 			 "customFieldData":[
 				{"field":{"id":456},"value":{"date":"02-10-2026"}},
 				{"field":{"id":789},"value":{"from":{"time":"09:00"},"to":{"time":"10:00"}}}
@@ -336,11 +387,13 @@ func TestListWorklogSortsByDateAndFrom(t *testing.T) {
 	}
 }
 
-func TestListWorklogNoMatchingEntries(t *testing.T) {
+func TestListWorklogNoEntries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"result":"success","comments":[
-			{"id":1,"text":"plain","type":"comment"}
-		]}`))
+		if r.URL.Path == "/rest/task/1/comments/list" {
+			_, _ = w.Write([]byte(`{"result":"success","comments":[{"id":1,"owner":{"id":"user:3","name":"Ann"}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"result":"success","dataTagEntries":[]}`))
 	}))
 	defer srv.Close()
 
@@ -368,6 +421,47 @@ func TestListWorklogAPIError(t *testing.T) {
 	}
 	if rows != nil || raw != nil {
 		t.Errorf("rows/raw = %v/%v, want nil/nil on error", rows, raw)
+	}
+}
+
+func TestListWorklogMinutesField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/task/1/comments/list":
+			_, _ = w.Write([]byte(`{"result":"success","comments":[{"id":30,"owner":{"id":"user:3","name":"Ann"}}]}`))
+		case "/rest/datatag/123/entry/list":
+			_, _ = w.Write([]byte(`{"result":"success","dataTagEntries":[
+				{"key":1,"commentId":30,"customFieldData":[
+					{"field":{"id":456},"value":{"date":"02-10-2026"}},
+					{"field":{"id":789},"value":90}
+				]}
+			]}`))
+		default:
+			t.Errorf("unexpected path = %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	meta := worklogTestMeta()
+	meta.TimeInMinutes = true
+	c := newTestClient(t, srv)
+	rows, _, err := c.ListWorklog(context.Background(), 1, meta)
+	if err != nil {
+		t.Fatalf("ListWorklog() error = %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one entry", rows)
+	}
+	r := rows[0]
+	if r.Date != "02-10-2026" || r.Hours != 1.5 {
+		t.Errorf("row = %+v, want date 02-10-2026 and 1.5 hours", r)
+	}
+	if r.From != "" || r.To != "" {
+		t.Errorf("row interval = %q-%q, want empty for a minutes field", r.From, r.To)
+	}
+	if r.Author != "Ann" {
+		t.Errorf("author = %q, want Ann", r.Author)
 	}
 }
 

@@ -27,6 +27,18 @@ func jsonDecode(r *http.Request, dst any) error {
 	return json.Unmarshal(b, dst)
 }
 
+// entryFields digs the created entry's customFieldData out of a
+// /task/{id}/datatags/ request body.
+func entryFields(t *testing.T, body map[string]any) []any {
+	t.Helper()
+	items, _ := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items = %#v, want one entry", body["items"])
+	}
+	cfd, _ := items[0].(map[string]any)["customFieldData"].([]any)
+	return cfd
+}
+
 // stubClient returns a ClientFunc pointing at srv.
 func stubClient(srv *httptest.Server) ClientFunc {
 	return func() (*planfix.Client, error) {
@@ -277,7 +289,7 @@ func TestAddRoundsHoursToWholeMinutes(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = jsonDecode(r, &body)
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -285,7 +297,7 @@ func TestAddRoundsHoursToWholeMinutes(t *testing.T) {
 	if _, err := exec(t, cmd, "add", "1", "--hours", "1.907"); err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	cfd, _ := body["customFieldData"].([]any)
+	cfd := entryFields(t, body)
 	timeVal := cfd[1].(map[string]any)["value"].(map[string]any)
 	fromStr := timeVal["from"].(map[string]any)["time"].(string)
 	toStr := timeVal["to"].(map[string]any)["time"].(string)
@@ -311,7 +323,7 @@ func TestAddHoursComputesInterval(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = jsonDecode(r, &body)
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -320,12 +332,13 @@ func TestAddHoursComputesInterval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	if body["type"] != "DataTag" {
-		t.Errorf("type = %v, want DataTag", body["type"])
+	tag, _ := body["dataTag"].(map[string]any)
+	if tag["id"] != float64(123) {
+		t.Errorf("dataTag = %v, want id 123", body["dataTag"])
 	}
-	cfd, _ := body["customFieldData"].([]any)
+	cfd := entryFields(t, body)
 	if len(cfd) != 2 {
-		t.Fatalf("customFieldData len = %d, want 2 (no work type): %v", len(cfd), body["customFieldData"])
+		t.Fatalf("customFieldData len = %d, want 2 (no work type): %v", len(cfd), cfd)
 	}
 	dateVal := cfd[0].(map[string]any)["value"].(map[string]any)
 	if dateVal["date"] != "02-10-2026" {
@@ -358,7 +371,7 @@ func TestAddFromToUsesGivenInterval(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = jsonDecode(r, &body)
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -368,9 +381,9 @@ func TestAddFromToUsesGivenInterval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	cfd, _ := body["customFieldData"].([]any)
+	cfd := entryFields(t, body)
 	if len(cfd) != 2 {
-		t.Fatalf("customFieldData len = %d, want 2: %v", len(cfd), body["customFieldData"])
+		t.Fatalf("customFieldData len = %d, want 2: %v", len(cfd), cfd)
 	}
 	dateVal := cfd[0].(map[string]any)["value"].(map[string]any)
 	if dateVal["date"] != "02-10-2026" {
@@ -388,7 +401,7 @@ func TestAddWorkTypeInBody(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = jsonDecode(r, &body)
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -396,7 +409,7 @@ func TestAddWorkTypeInBody(t *testing.T) {
 	if _, err := exec(t, cmd, "add", "1", "--hours", "1", "--work-type", "5"); err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	cfd, _ := body["customFieldData"].([]any)
+	cfd := entryFields(t, body)
 	if len(cfd) != 3 {
 		t.Fatalf("customFieldData len = %d, want 3", len(cfd))
 	}
@@ -411,11 +424,13 @@ func TestAddWorkTypeInBody(t *testing.T) {
 
 func TestAddNotePostsFollowUpComment(t *testing.T) {
 	var bodies []map[string]any
+	var queries []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var b map[string]any
 		_ = jsonDecode(r, &b)
 		bodies = append(bodies, b)
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		queries = append(queries, r.URL.RawQuery)
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -426,14 +441,15 @@ func TestAddNotePostsFollowUpComment(t *testing.T) {
 	if len(bodies) != 2 {
 		t.Fatalf("requests = %d, want 2 (entry + note)", len(bodies))
 	}
-	if bodies[0]["type"] != "DataTag" {
-		t.Errorf("first request type = %v, want DataTag", bodies[0]["type"])
+	tag, _ := bodies[0]["dataTag"].(map[string]any)
+	if tag["id"] != float64(123) {
+		t.Errorf("first request dataTag = %v, want id 123", bodies[0]["dataTag"])
 	}
-	if bodies[1]["text"] != "did stuff" {
-		t.Errorf("note text = %v, want \"did stuff\"", bodies[1]["text"])
+	if bodies[1]["description"] != "did stuff" {
+		t.Errorf("note description = %v, want \"did stuff\"", bodies[1]["description"])
 	}
-	if bodies[1]["silent"] != true {
-		t.Errorf("note silent = %v, want true", bodies[1]["silent"])
+	if queries[1] != "silent=true" {
+		t.Errorf("note query = %q, want silent=true", queries[1])
 	}
 }
 
@@ -442,7 +458,7 @@ func TestAddNoteFailureSurfacesWorklogID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
-			_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+			_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 			return
 		}
 		w.WriteHeader(http.StatusInternalServerError)
@@ -465,7 +481,7 @@ func TestAddNoteFailureSurfacesWorklogID(t *testing.T) {
 
 func TestAddQuietPrintsIDOnly(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -481,7 +497,7 @@ func TestAddQuietPrintsIDOnly(t *testing.T) {
 
 func TestAddJSONOutputsPrettyRaw(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -490,14 +506,14 @@ func TestAddJSONOutputsPrettyRaw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	if !strings.Contains(out, "{\n  \"result\"") || !strings.Contains(out, "\"id\": 77") {
+	if !strings.Contains(out, "{\n  \"result\"") || !strings.Contains(out, "\"commentId\": 77") {
 		t.Errorf("json output not pretty-printed:\n%s", out)
 	}
 }
 
 func TestAddRefreshFlagReachesMetaFunc(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"result":"success","id":77}`))
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
 	}))
 	defer srv.Close()
 
@@ -512,9 +528,12 @@ func TestAddRefreshFlagReachesMetaFunc(t *testing.T) {
 }
 
 const listCommentsResponse = `{"result":"success","comments":[
-	{"id":1,"text":"plain","type":"comment","author":{"id":3,"name":"X"}},
-	{"id":3,"type":"DataTag","dataTag":{"id":123},"author":{"id":3,"name":"Ann"},
-	 "customFieldData":[
+	{"id":1,"owner":{"id":"user:3","name":"X"}},
+	{"id":3,"owner":{"id":"user:3","name":"Ann"}}
+]}`
+
+const listEntriesResponse = `{"result":"success","dataTagEntries":[
+	{"key":1,"commentId":3,"customFieldData":[
 		{"field":{"id":456},"value":{"date":"02-10-2026"}},
 		{"field":{"id":789},"value":{"from":{"time":"10:00"},"to":{"time":"12:00"}}},
 		{"field":{"id":101},"value":{"id":1,"name":"Dev"}}
@@ -524,10 +543,15 @@ const listCommentsResponse = `{"result":"success","comments":[
 func listServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/task/1/comment/list" {
-			t.Errorf("path = %s, want /task/1/comment/list", r.URL.Path)
+		switch r.URL.Path {
+		case "/task/1/comments/list":
+			_, _ = w.Write([]byte(listCommentsResponse))
+		case "/datatag/123/entry/list":
+			_, _ = w.Write([]byte(listEntriesResponse))
+		default:
+			t.Errorf("unexpected path = %s", r.URL.Path)
+			http.NotFound(w, r)
 		}
-		_, _ = w.Write([]byte(listCommentsResponse))
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -573,7 +597,7 @@ func TestListJSONOutputsPrettyRaw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list error = %v", err)
 	}
-	if !strings.Contains(out, "{\n  \"result\"") || !strings.Contains(out, "\"comments\"") {
+	if !strings.Contains(out, "{\n  \"result\"") || !strings.Contains(out, "\"dataTagEntries\"") {
 		t.Errorf("json output not pretty-printed:\n%s", out)
 	}
 }
@@ -584,7 +608,7 @@ func discoverServer(t *testing.T, hits *int) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*hits++
 		switch r.URL.Path {
-		case "/datatag":
+		case "/datatag/list":
 			_, _ = w.Write([]byte(`{"result":"success","dataTags":[
 				{"id":2,"name":"Фактическое время"}
 			]}`))
@@ -708,10 +732,10 @@ func TestDefaultMetaFuncWarnsAndContinuesWhenPersistFails(t *testing.T) {
 	os.Stderr = w
 	got, callErr := fn(context.Background(), c, false)
 	os.Stderr = old
-	w.Close()
+	_ = w.Close()
 	var warn bytes.Buffer
 	_, _ = io.Copy(&warn, r)
-	r.Close()
+	_ = r.Close()
 
 	if callErr != nil {
 		t.Fatalf("MetaFunc() error = %v, want success with warning", callErr)

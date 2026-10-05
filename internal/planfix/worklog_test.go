@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"planfix-cli/internal/config"
+	"github.com/6insanes/planfix-cli/internal/config"
 )
 
 func worklogTestMeta() *config.WorklogMeta {

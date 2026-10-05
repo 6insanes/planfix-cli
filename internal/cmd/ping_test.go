@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 func newTestClient(t *testing.T, srv *httptest.Server) *planfix.Client {

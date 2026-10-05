@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"planfix-cli/internal/buildinfo"
+	"github.com/6insanes/planfix-cli/internal/buildinfo"
 )
 
 // execute runs an isolated root command tree and returns its output.

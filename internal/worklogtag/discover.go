@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"planfix-cli/internal/config"
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/config"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 // Field-type codes returned by Planfix. Matching is primarily by field name;

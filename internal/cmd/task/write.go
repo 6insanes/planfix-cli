@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"planfix-cli/internal/output"
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/output"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 // NewWriteCmd adds the create/update/open commands to the task group.
@@ -164,7 +164,11 @@ func newOpenCmd(getDomain func() string) *cobra.Command {
 			if err != nil || id <= 0 {
 				return fmt.Errorf("invalid task id %q", args[0])
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "https://%s/task/%d\n", planfix.NormalizeDomain(getDomain()), id)
+			domain := getDomain()
+			if domain == "" {
+				return fmt.Errorf("no domain configured; run `planfix auth login`")
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "https://%s/task/%d\n", planfix.NormalizeDomain(domain), id)
 			return nil
 		},
 	}

@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"planfix-cli/internal/output"
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/output"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 // Options are the global flags the project commands honour.

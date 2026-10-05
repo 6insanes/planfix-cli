@@ -1,8 +1,17 @@
 # planfix
 
+[![CI](https://github.com/6insanes/planfix-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/6insanes/planfix-cli/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/6insanes/planfix-cli.svg)](https://pkg.go.dev/github.com/6insanes/planfix-cli)
+
 Command-line client for the Planfix REST API. Built for agent use.
 
 ## Install
+
+Prebuilt binaries: [Releases](https://github.com/6insanes/planfix-cli/releases).
+
+    go install github.com/6insanes/planfix-cli@latest
+
+Or build from source:
 
     go build -o planfix .
     cp planfix ~/.local/bin/

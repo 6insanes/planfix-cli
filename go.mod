@@ -1,4 +1,4 @@
-module planfix-cli
+module github.com/6insanes/planfix-cli
 
 go 1.22.2
 

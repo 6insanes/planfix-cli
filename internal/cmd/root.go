@@ -6,15 +6,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"planfix-cli/internal/buildinfo"
-	"planfix-cli/internal/cmd/auth"
-	"planfix-cli/internal/cmd/comment"
-	"planfix-cli/internal/cmd/project"
-	"planfix-cli/internal/cmd/task"
-	"planfix-cli/internal/cmd/timecmd"
-	"planfix-cli/internal/cmd/user"
-	"planfix-cli/internal/config"
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/buildinfo"
+	"github.com/6insanes/planfix-cli/internal/cmd/auth"
+	"github.com/6insanes/planfix-cli/internal/cmd/comment"
+	"github.com/6insanes/planfix-cli/internal/cmd/project"
+	"github.com/6insanes/planfix-cli/internal/cmd/task"
+	"github.com/6insanes/planfix-cli/internal/cmd/timecmd"
+	"github.com/6insanes/planfix-cli/internal/cmd/user"
+	"github.com/6insanes/planfix-cli/internal/config"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 // GlobalOpts holds the persistent flags available to every command.
@@ -122,16 +122,16 @@ func newClient() (*planfix.Client, error) {
 }
 
 // activeDomain resolves the active profile's domain for URL printing,
-// falling back to the default Planfix domain when no profile is usable.
+// returning an empty string when no profile is usable.
 func activeDomain() string {
 	cfg, err := config.Load(config.ResolvePath())
 	if err != nil {
-		return "example.planfix.ru"
+		return ""
 	}
 	name := config.ResolveProfileName(globalOpts.Profile, cfg)
 	p, err := config.Resolve(cfg, name)
 	if err != nil || p.Domain == "" {
-		return "example.planfix.ru"
+		return ""
 	}
 	return planfix.NormalizeDomain(p.Domain)
 }

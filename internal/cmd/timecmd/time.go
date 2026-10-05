@@ -11,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"planfix-cli/internal/config"
-	"planfix-cli/internal/output"
-	"planfix-cli/internal/planfix"
-	"planfix-cli/internal/worklogtag"
+	"github.com/6insanes/planfix-cli/internal/config"
+	"github.com/6insanes/planfix-cli/internal/output"
+	"github.com/6insanes/planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/worklogtag"
 )
 
 // Options are the global flags the time commands honour.

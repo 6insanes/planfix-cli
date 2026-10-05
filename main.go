@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"planfix-cli/internal/cmd"
+	"github.com/6insanes/planfix-cli/internal/cmd"
 )
 
 func main() {

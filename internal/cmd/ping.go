@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 // newPingCmd builds the ping subcommand.

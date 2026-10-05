@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 func TestFieldColumns(t *testing.T) {

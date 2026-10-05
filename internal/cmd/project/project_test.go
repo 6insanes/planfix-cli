@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 // stubClient returns a ClientFunc pointing at srv.

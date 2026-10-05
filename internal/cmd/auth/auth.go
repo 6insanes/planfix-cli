@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"planfix-cli/internal/config"
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/config"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 // openClient builds an API client; tests swap it to point at a fake server.

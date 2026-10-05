@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"planfix-cli/internal/planfix"
+	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
 func jsonDecode(r *http.Request, dst any) error {

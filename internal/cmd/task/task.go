@@ -34,6 +34,7 @@ func NewCmd(getClient ClientFunc, getOpts func() Options, getDomain func() strin
 	}
 	taskCmd.AddCommand(newListCmd(getClient, getOpts))
 	taskCmd.AddCommand(newViewCmd(getClient, getOpts))
+	taskCmd.AddCommand(newStatusesCmd(getClient, getOpts))
 	NewWriteCmd(taskCmd, getClient, getOpts, getDomain)
 	return taskCmd
 }

@@ -100,12 +100,14 @@ type Task struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description,omitempty"`
 	Status      Status      `json:"status"`
+	ProcessID   int         `json:"processId,omitempty"`
 	Priority    string      `json:"priority,omitempty"`
 	Project     *ProjectRef `json:"project,omitempty"`
 	StartDate   string      `json:"startDate,omitempty"`
 	EndDate     string      `json:"endDate,omitempty"`
 	Assignees   struct {
-		Users []PersonRef `json:"users,omitempty"`
+		Users  []PersonRef `json:"users,omitempty"`
+		Groups []PersonRef `json:"groups,omitempty"`
 	} `json:"assignees,omitempty"`
 }
 

@@ -16,6 +16,7 @@ import (
 func NewWriteCmd(taskCmd *cobra.Command, getClient ClientFunc, getOpts func() Options, getDomain func() string) {
 	taskCmd.AddCommand(newCreateCmd(getClient, getOpts))
 	taskCmd.AddCommand(newUpdateCmd(getClient, getOpts))
+	taskCmd.AddCommand(newTakeCmd(getClient, getOpts))
 	taskCmd.AddCommand(newOpenCmd(getDomain))
 }
 
@@ -147,7 +148,7 @@ func newUpdateCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 
 	cmd.Flags().StringVar(&name, "name", "", "new name")
 	cmd.Flags().StringVar(&description, "description", "", "new description")
-	cmd.Flags().IntVar(&status, "status", 0, "status id")
+	cmd.Flags().IntVar(&status, "status", 0, "status id (see `task statuses`)")
 	cmd.Flags().StringVar(&assignees, "assignees", "", "replace assignees (user:N,...)")
 	cmd.Flags().StringVar(&startDate, "start-date", "", "start date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&endDate, "end-date", "", "end date (YYYY-MM-DD)")

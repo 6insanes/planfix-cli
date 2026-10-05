@@ -30,7 +30,7 @@ Or via env (no config file):
 
 ## Commands
 
-    planfix task list|view|create|update|open
+    planfix task list|view|statuses|create|update|take|open
     planfix comment list|add|edit|delete
     planfix time add|list
     planfix project list

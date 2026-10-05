@@ -7,7 +7,9 @@ Command-line client for the Planfix REST API. Built for agent use.
 
 ## Install
 
-Prebuilt binaries: [Releases](https://github.com/6insanes/planfix-cli/releases).
+Prebuilt binaries: [Releases](https://github.com/6insanes/planfix-cli/releases)
+and per-commit snapshot builds in the artifacts of
+[CI runs](https://github.com/6insanes/planfix-cli/actions/workflows/ci.yml).
 
     go install github.com/6insanes/planfix-cli@latest
 

@@ -51,11 +51,11 @@ func stubClient(srv *httptest.Server) ClientFunc {
 	}
 }
 
-// stubMeta returns a MetaFunc returning meta, recording refresh requests.
-func stubMeta(meta *config.WorklogMeta, refreshSeen *bool) MetaFunc {
-	return func(ctx context.Context, c *planfix.Client, refresh bool) (*config.WorklogMeta, error) {
-		if refreshSeen != nil {
-			*refreshSeen = refresh
+// stubMeta returns a MetaFunc returning meta, recording the meta options.
+func stubMeta(meta *config.WorklogMeta, optsSeen *MetaOpts) MetaFunc {
+	return func(ctx context.Context, c *planfix.Client, opts MetaOpts) (*config.WorklogMeta, error) {
+		if optsSeen != nil {
+			*optsSeen = opts
 		}
 		if meta == nil {
 			return nil, io.ErrUnexpectedEOF
@@ -66,10 +66,11 @@ func stubMeta(meta *config.WorklogMeta, refreshSeen *bool) MetaFunc {
 
 func testMeta() *config.WorklogMeta {
 	return &config.WorklogMeta{
-		DataTagID:     123,
-		FieldDate:     456,
-		FieldTime:     789,
-		FieldWorkType: 101,
+		DataTagID:         123,
+		FieldDate:         456,
+		FieldTime:         789,
+		FieldWorkType:     101,
+		WorkTypeDirectory: 3,
 	}
 }
 
@@ -259,15 +260,30 @@ func TestAddRejectsMultiDayFromTo(t *testing.T) {
 	}
 }
 
-func TestAddRejectsNegativeWorkType(t *testing.T) {
+func TestAddRejectsNonNumericDirectoryWorkType(t *testing.T) {
 	srv := noCalls(t)
 	cmd := testCmd(srv, Options{}, testMeta())
 	_, err := exec(t, cmd, "add", "1", "--hours", "1", "--work-type=-1")
 	if err == nil {
 		t.Fatal("--work-type -1: error = nil, want failure")
 	}
-	if !strings.Contains(err.Error(), "work-type") {
-		t.Errorf("error = %q, want mention of --work-type", err)
+	if !strings.Contains(err.Error(), "work type") || !strings.Contains(err.Error(), "numeric key") {
+		t.Errorf("error = %q, want mention of work type and numeric key", err)
+	}
+}
+
+func TestAddRejectsUnknownListWorkType(t *testing.T) {
+	srv := noCalls(t)
+	meta := testMeta()
+	meta.WorkTypeDirectory = 0
+	meta.WorkTypeValues = []string{"Работа", "Bugfix"}
+	cmd := testCmd(srv, Options{}, meta)
+	_, err := exec(t, cmd, "add", "1", "--hours", "1", "--work-type", "Прочее")
+	if err == nil {
+		t.Fatal("unknown list value: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "allowed values") {
+		t.Errorf("error = %q, want allowed values listed", err)
 	}
 }
 
@@ -453,6 +469,38 @@ func TestAddNotePostsFollowUpComment(t *testing.T) {
 	}
 }
 
+func TestAddNoteWritesNoteField(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = jsonDecode(r, &b)
+		bodies = append(bodies, b)
+		_, _ = w.Write([]byte(`{"result":"success","keys":[77],"commentId":77}`))
+	}))
+	defer srv.Close()
+
+	meta := testMeta()
+	meta.FieldNote = 202
+	cmd := testCmd(srv, Options{}, meta)
+	if _, err := exec(t, cmd, "add", "1", "--hours", "1", "--note", "did stuff"); err != nil {
+		t.Fatalf("add error = %v", err)
+	}
+	if len(bodies) != 1 {
+		t.Fatalf("requests = %d, want 1 (note lives in the entry)", len(bodies))
+	}
+	cfd := entryFields(t, bodies[0])
+	if len(cfd) != 3 {
+		t.Fatalf("customFieldData len = %d, want 3", len(cfd))
+	}
+	note := cfd[2].(map[string]any)
+	if note["field"].(map[string]any)["id"] != float64(202) {
+		t.Errorf("note field = %v, want 202", note["field"])
+	}
+	if note["value"] != "did stuff" {
+		t.Errorf("note value = %v, want \"did stuff\"", note["value"])
+	}
+}
+
 func TestAddNoteFailureSurfacesWorklogID(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -517,13 +565,16 @@ func TestAddRefreshFlagReachesMetaFunc(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	var refresh bool
-	cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, stubMeta(testMeta(), &refresh))
-	if _, err := exec(t, cmd, "add", "1", "--hours", "1", "--refresh-worklog-meta"); err != nil {
+	var seen MetaOpts
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, stubMeta(testMeta(), &seen))
+	if _, err := exec(t, cmd, "add", "1", "--hours", "1", "--refresh-worklog-meta", "--data-tag", "9"); err != nil {
 		t.Fatalf("add error = %v", err)
 	}
-	if !refresh {
+	if !seen.Refresh {
 		t.Error("--refresh-worklog-meta did not reach MetaFunc")
+	}
+	if seen.DataTag != "9" {
+		t.Errorf("MetaOpts.DataTag = %q, want \"9\"", seen.DataTag)
 	}
 }
 
@@ -614,10 +665,10 @@ func discoverServer(t *testing.T, hits *int) *httptest.Server {
 			]}`))
 		case "/datatag/2":
 			_, _ = w.Write([]byte(`{"result":"success","dataTag":{"id":2,"name":"Фактическое время","fields":[
-				{"id":10,"name":"Дата","type":1},
-				{"id":11,"name":"Время","type":5},
-				{"id":12,"name":"Вид работ","type":7,"directoryId":3},
-				{"id":13,"name":"Сотрудник","type":10}
+				{"id":10,"name":"Дата","type":3},
+				{"id":11,"name":"Время","type":6},
+				{"id":12,"name":"Вид работ","type":9,"directoryId":3},
+				{"id":13,"name":"Сотрудник","type":11}
 			]}}`))
 		default:
 			http.NotFound(w, r)
@@ -635,11 +686,11 @@ func TestDefaultMetaFuncReturnsProfileWorklog(t *testing.T) {
 	}
 	c.BaseURL = srv.URL
 
-	want := &config.WorklogMeta{DataTagID: 7, FieldDate: 8, FieldTime: 9}
+	want := &config.WorklogMeta{DataTag: "7", DataTagID: 7, FieldDate: 8, FieldTime: 9}
 	fn := DefaultMetaFunc(func() (string, *config.Profile, error) {
 		return "default", &config.Profile{Worklog: want}, nil
 	})
-	got, err := fn(context.Background(), c, false)
+	got, err := fn(context.Background(), c, MetaOpts{})
 	if err != nil {
 		t.Fatalf("MetaFunc() error = %v", err)
 	}
@@ -648,7 +699,7 @@ func TestDefaultMetaFuncReturnsProfileWorklog(t *testing.T) {
 	}
 }
 
-func TestDefaultMetaFuncDiscoversCachesAndRefreshes(t *testing.T) {
+func TestDefaultMetaFuncResolvesPinCachesAndRefreshes(t *testing.T) {
 	t.Setenv("PLANFIX_CONFIG", filepath.Join(t.TempDir(), "config.yml"))
 	path := config.ResolvePath()
 	if err := config.Save(path, &config.Config{
@@ -667,21 +718,21 @@ func TestDefaultMetaFuncDiscoversCachesAndRefreshes(t *testing.T) {
 	}
 	c.BaseURL = srv.URL
 
-	// Stale profile snapshot: later calls must be served from the cache.
+	// Profile pin without a resolved schema: later calls must be cached.
 	fn := DefaultMetaFunc(func() (string, *config.Profile, error) {
-		return "default", &config.Profile{Domain: "example.com", Token: "tok"}, nil
+		return "default", &config.Profile{Worklog: &config.WorklogMeta{DataTag: "2"}}, nil
 	})
 
-	got, err := fn(context.Background(), c, false)
+	got, err := fn(context.Background(), c, MetaOpts{})
 	if err != nil {
 		t.Fatalf("first call error = %v", err)
 	}
-	if got.DataTagID != 2 || got.FieldDate != 10 || got.FieldTime != 11 ||
+	if got.DataTag != "2" || got.DataTagID != 2 || got.FieldDate != 10 || got.FieldTime != 11 ||
 		got.FieldWorkType != 12 || got.WorkTypeDirectory != 3 {
-		t.Errorf("discovered meta = %+v", got)
+		t.Errorf("resolved meta = %+v", got)
 	}
-	if hits != 2 {
-		t.Fatalf("hits after discover = %d, want 2", hits)
+	if hits != 1 {
+		t.Fatalf("hits after resolve = %d, want 1 (GET /datatag/2)", hits)
 	}
 
 	cfg, err := config.Load(path)
@@ -689,22 +740,90 @@ func TestDefaultMetaFuncDiscoversCachesAndRefreshes(t *testing.T) {
 		t.Fatalf("load config: %v", err)
 	}
 	persisted := cfg.Profiles["default"].Worklog
-	if persisted == nil || persisted.DataTagID != 2 {
-		t.Errorf("persisted worklog = %+v, want DataTagID 2", persisted)
+	if persisted == nil || persisted.DataTagID != 2 || persisted.DataTag != "2" {
+		t.Errorf("persisted worklog = %+v, want pin 2 resolved to tag 2", persisted)
 	}
 
-	if _, err := fn(context.Background(), c, false); err != nil {
+	if _, err := fn(context.Background(), c, MetaOpts{}); err != nil {
 		t.Fatalf("second call error = %v", err)
 	}
-	if hits != 2 {
-		t.Errorf("hits after cached call = %d, want 2 (served from cache)", hits)
+	if hits != 1 {
+		t.Errorf("hits after cached call = %d, want 1 (served from cache)", hits)
 	}
 
-	if _, err := fn(context.Background(), c, true); err != nil {
+	if _, err := fn(context.Background(), c, MetaOpts{Refresh: true}); err != nil {
 		t.Fatalf("refresh call error = %v", err)
 	}
-	if hits != 4 {
-		t.Errorf("hits after refresh = %d, want 4 (re-discovered)", hits)
+	if hits != 2 {
+		t.Errorf("hits after refresh = %d, want 2 (re-resolved)", hits)
+	}
+}
+
+func TestDefaultMetaFuncReResolvesOnPinChange(t *testing.T) {
+	t.Setenv("PLANFIX_CONFIG", filepath.Join(t.TempDir(), "config.yml"))
+
+	var hits int
+	srv := discoverServer(t, &hits)
+	c, err := planfix.New("example.com", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+
+	// Cached block from another tag plus a changed pin: the stale field ids
+	// must not be served.
+	stale := &config.WorklogMeta{DataTag: "2", DataTagID: 5, FieldDate: 50, FieldTime: 51}
+	fn := DefaultMetaFunc(func() (string, *config.Profile, error) {
+		return "default", &config.Profile{Worklog: stale}, nil
+	})
+	got, err := fn(context.Background(), c, MetaOpts{})
+	if err != nil {
+		t.Fatalf("MetaFunc() error = %v", err)
+	}
+	if got.DataTagID != 2 || got.FieldDate != 10 {
+		t.Errorf("meta = %+v, want re-resolved schema of tag 2", got)
+	}
+}
+
+func TestDefaultMetaFuncNoPinFailsListingCandidates(t *testing.T) {
+	var hits int
+	srv := discoverServer(t, &hits)
+	c, err := planfix.New("example.com", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+
+	fn := DefaultMetaFunc(func() (string, *config.Profile, error) {
+		return "default", &config.Profile{}, nil
+	})
+	_, err = fn(context.Background(), c, MetaOpts{})
+	if err == nil {
+		t.Fatal("no pin: error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "not configured") || !strings.Contains(err.Error(), "Фактическое время") {
+		t.Errorf("err = %v, want guidance with candidate tags", err)
+	}
+}
+
+func TestDefaultMetaFuncDataTagOverrideSkipsCache(t *testing.T) {
+	var hits int
+	srv := discoverServer(t, &hits)
+	c, err := planfix.New("example.com", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.BaseURL = srv.URL
+
+	fn := DefaultMetaFunc(func() (string, *config.Profile, error) {
+		return "default", &config.Profile{}, nil
+	})
+	got, err := fn(context.Background(), c, MetaOpts{DataTag: "2"})
+	if err != nil {
+		t.Fatalf("override call error = %v", err)
+	}
+	if got.DataTagID != 2 {
+		t.Errorf("meta = %+v, want tag 2 from the override", got)
 	}
 }
 
@@ -721,7 +840,7 @@ func TestDefaultMetaFuncWarnsAndContinuesWhenPersistFails(t *testing.T) {
 	c.BaseURL = srv.URL
 
 	fn := DefaultMetaFunc(func() (string, *config.Profile, error) {
-		return "default", &config.Profile{Domain: "example.com", Token: "tok"}, nil
+		return "default", &config.Profile{Worklog: &config.WorklogMeta{DataTag: "2"}}, nil
 	})
 
 	r, w, err := os.Pipe()
@@ -730,7 +849,7 @@ func TestDefaultMetaFuncWarnsAndContinuesWhenPersistFails(t *testing.T) {
 	}
 	old := os.Stderr
 	os.Stderr = w
-	got, callErr := fn(context.Background(), c, false)
+	got, callErr := fn(context.Background(), c, MetaOpts{})
 	os.Stderr = old
 	_ = w.Close()
 	var warn bytes.Buffer
@@ -741,7 +860,7 @@ func TestDefaultMetaFuncWarnsAndContinuesWhenPersistFails(t *testing.T) {
 		t.Fatalf("MetaFunc() error = %v, want success with warning", callErr)
 	}
 	if got == nil || got.DataTagID != 2 {
-		t.Fatalf("meta = %+v, want discovered meta despite persist failure", got)
+		t.Fatalf("meta = %+v, want resolved meta despite persist failure", got)
 	}
 	if !strings.Contains(warn.String(), "warning") {
 		t.Errorf("stderr = %q, want persist warning", warn.String())

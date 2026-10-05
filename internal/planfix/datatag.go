@@ -21,10 +21,11 @@ type DataTag struct {
 
 // DataField is a custom field on a data tag.
 type DataField struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Type        int    `json:"type"`
-	DirectoryID int    `json:"directoryId,omitempty"`
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	Type        int      `json:"type"`
+	DirectoryID int      `json:"directoryId,omitempty"`
+	EnumValues  []string `json:"enumValues,omitempty"`
 }
 
 // DataTagList is the POST /datatag/list payload.

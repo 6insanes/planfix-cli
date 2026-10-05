@@ -1,4 +1,4 @@
-// Package worklogtag finds the account's worklog data tag and its field ids.
+// Package worklogtag maps the pinned worklog data tag onto its field ids.
 package worklogtag
 
 import (
@@ -11,14 +11,17 @@ import (
 	"github.com/6insanes/planfix-cli/internal/planfix"
 )
 
-// Field-type codes returned by Planfix. Matching is primarily by field name;
-// the type is a soft hint (pass 1: name+type, pass 2: name only) because the
-// codes are unverified and may drift between accounts.
+// Field-type codes from the Planfix REST spec customFieldTypes list.
 const (
-	typeDate           = 1
-	typePeriodOfTime   = 5
-	typeDirectoryEntry = 7
-	typeUsersArray     = 10
+	typeShortText      = 0
+	typeNumber         = 1
+	typeMultiLineText  = 2
+	typeDate           = 3
+	typePeriodOfTime   = 6
+	typeList           = 8
+	typeDirectoryEntry = 9
+	typeEmployee       = 11
+	typeListOfUsers    = 14
 )
 
 // dateDecoys are name fragments marking a change/creation timestamp rather
@@ -82,15 +85,20 @@ func dateScore(name string, typ int) int {
 	return score
 }
 
-// pickField selects a field by name. When typ > 0 the first pass requires
-// name+type (highest confidence); the second pass accepts a name-only match
-// so an unverified type code cannot make discovery fail. taken reports field
-// ids already assigned to earlier slots and is honoured only in the name-only
-// pass.
-func pickField(fields []planfix.DataField, nameOK func(string) bool, typ int, taken func(int) bool) planfix.DataField {
-	if typ != 0 {
-		for _, f := range fields {
-			if f.Type == typ && nameOK(strings.ToLower(f.Name)) {
+// pickField selects a field by name and type. When several types are given,
+// the first pass requires name+type (highest confidence); the second pass
+// accepts a name-only match so an unexpected type code cannot make mapping
+// fail. taken reports field ids already assigned to earlier slots.
+func pickField(fields []planfix.DataField, nameOK func(string) bool, taken func(int) bool, types ...int) planfix.DataField {
+	for _, f := range fields {
+		if taken != nil && taken(f.ID) {
+			continue
+		}
+		if !nameOK(strings.ToLower(f.Name)) {
+			continue
+		}
+		for _, typ := range types {
+			if f.Type == typ {
 				return f
 			}
 		}
@@ -112,29 +120,62 @@ func describeFields(fields []planfix.DataField) string {
 	return strings.Join(parts, ", ")
 }
 
-// Discover finds the worklog data tag and maps its field ids.
-func Discover(ctx context.Context, c *planfix.Client) (*config.WorklogMeta, error) {
-	list, err := c.ListDataTags(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	bestID, bestScore := 0, 0
-	for _, dt := range list.DataTags {
-		score := MatchName(dt.Name)
-		if score > bestScore {
-			bestScore, bestID = score, dt.ID
+// describeTags lists worklog-like tags for error messages.
+func describeTags(tags []planfix.DataTag) string {
+	parts := make([]string, 0, len(tags))
+	for _, dt := range tags {
+		if MatchName(dt.Name) > 0 {
+			parts = append(parts, fmt.Sprintf("%d %q", dt.ID, dt.Name))
 		}
 	}
-	if bestID == 0 {
-		return nil, fmt.Errorf("worklog data tag not found on this account")
+	if len(parts) == 0 {
+		return "(none)"
 	}
+	return strings.Join(parts, ", ")
+}
 
-	tag, err := c.GetDataTag(ctx, bestID)
+// Resolve maps the pinned worklog data tag (numeric id or exact tag name)
+// onto its field ids. An empty or unknown selector fails with the account's
+// worklog-like tags listed: worklog tags cannot be auto-picked by name when
+// several departments keep one tag each.
+func Resolve(ctx context.Context, c *planfix.Client, selector string) (*config.WorklogMeta, error) {
+	if selector == "" {
+		list, err := c.ListDataTags(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf(
+			"worklog data tag is not configured; set worklog.datatag (id or exact name) in the config or pass --data-tag; worklog-like tags: %s",
+			describeTags(list.DataTags))
+	}
+	id, err := strconv.Atoi(selector)
+	if err != nil {
+		list, lerr := c.ListDataTags(ctx)
+		if lerr != nil {
+			return nil, lerr
+		}
+		for _, dt := range list.DataTags {
+			if strings.EqualFold(dt.Name, selector) {
+				id = dt.ID
+				break
+			}
+		}
+		if id == 0 {
+			return nil, fmt.Errorf("data tag %q not found; worklog-like tags: %s",
+				selector, describeTags(list.DataTags))
+		}
+	}
+	tag, err := c.GetDataTag(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	return MetaFromTag(*tag)
+}
 
+// MetaFromTag maps one data tag's custom fields onto the worklog slots.
+// Matching is primarily by field name; the type code is a tie-breaker within
+// a slot. Date and time slots are required.
+func MetaFromTag(tag planfix.DataTag) (*config.WorklogMeta, error) {
 	meta := &config.WorklogMeta{DataTagID: tag.ID}
 
 	dateBest, dateBestScore := 0, -1
@@ -147,7 +188,7 @@ func Discover(ctx context.Context, c *planfix.Client) (*config.WorklogMeta, erro
 
 	taken := func(id int) bool {
 		return id != 0 && (id == meta.FieldDate || id == meta.FieldTime ||
-			id == meta.FieldWorkType || id == meta.FieldEmployee)
+			id == meta.FieldWorkType || id == meta.FieldNote || id == meta.FieldEmployee)
 	}
 	isTime := func(n string) bool {
 		return strings.Contains(n, "время") || strings.Contains(n, "период") ||
@@ -159,20 +200,32 @@ func Discover(ctx context.Context, c *planfix.Client) (*config.WorklogMeta, erro
 		return strings.Contains(n, "минут") || strings.Contains(n, "minute")
 	}
 	isWorkType := func(n string) bool {
-		return strings.Contains(n, "вид") || strings.Contains(n, "work")
+		return strings.Contains(n, "статус") || strings.Contains(n, "status") ||
+			strings.Contains(n, "вид") || strings.Contains(n, "тип работ") ||
+			strings.Contains(n, "work type") || strings.Contains(n, "type of work")
+	}
+	isNote := func(n string) bool {
+		return strings.Contains(n, "детали") || strings.Contains(n, "подробност") ||
+			strings.Contains(n, "описан") || strings.Contains(n, "примечан") ||
+			strings.Contains(n, "note") || strings.Contains(n, "detail") ||
+			strings.Contains(n, "comment")
 	}
 	isEmployee := func(n string) bool {
 		return strings.Contains(n, "сотрудник") || strings.Contains(n, "employee")
 	}
 
-	if tf := pickField(tag.Fields, isTime, typePeriodOfTime, taken); tf.ID != 0 {
+	if tf := pickField(tag.Fields, isTime, taken, typePeriodOfTime); tf.ID != 0 {
 		meta.FieldTime = tf.ID
-	} else if tf := pickField(tag.Fields, isMinutesTime, 0, taken); tf.ID != 0 {
+	} else if tf := pickField(tag.Fields, isMinutesTime, taken, typeNumber); tf.ID != 0 {
 		meta.FieldTime, meta.TimeInMinutes = tf.ID, true
 	}
-	wt := pickField(tag.Fields, isWorkType, typeDirectoryEntry, taken)
+	wt := pickField(tag.Fields, isWorkType, taken, typeList, typeDirectoryEntry)
 	meta.FieldWorkType, meta.WorkTypeDirectory = wt.ID, wt.DirectoryID
-	meta.FieldEmployee = pickField(tag.Fields, isEmployee, typeUsersArray, taken).ID
+	if wt.Type == typeList {
+		meta.WorkTypeValues = wt.EnumValues
+	}
+	meta.FieldNote = pickField(tag.Fields, isNote, taken, typeMultiLineText, typeShortText).ID
+	meta.FieldEmployee = pickField(tag.Fields, isEmployee, taken, typeEmployee, typeListOfUsers).ID
 
 	if meta.FieldDate == 0 || meta.FieldTime == 0 {
 		return nil, fmt.Errorf("worklog data tag %d is missing date/time fields (fields: %s)",

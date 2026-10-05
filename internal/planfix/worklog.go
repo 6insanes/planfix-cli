@@ -16,10 +16,11 @@ import (
 
 // WorklogEntry is one time-tracking record to write.
 type WorklogEntry struct {
-	Date        string // dd-MM-yyyy
-	From        string // HH:MM
-	To          string // HH:MM
-	WorkTypeKey int    // directory entry key, 0 = omit
+	Date     string // dd-MM-yyyy
+	From     string // HH:MM
+	To       string // HH:MM
+	WorkType string // list value name or directory entry key, "" = omit
+	Note     string // work details text, "" = omit
 }
 
 // WorklogRow is one entry for display.
@@ -29,6 +30,7 @@ type WorklogRow struct {
 	To       string
 	Hours    float64
 	WorkType string
+	Note     string
 	Author   string
 }
 
@@ -42,12 +44,9 @@ type DataTagEntry struct {
 // CreateWorklogEntry writes a data tag entry to the task's worklog tag and
 // returns the created entry's key (falling back to its comment id).
 func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *config.WorklogMeta, e WorklogEntry) (int, []byte, error) {
-	if e.WorkTypeKey < 0 {
-		return 0, nil, fmt.Errorf("work type key %d must not be negative", e.WorkTypeKey)
-	}
-	if e.WorkTypeKey != 0 && meta.FieldWorkType == 0 {
+	if e.WorkType != "" && meta.FieldWorkType == 0 {
 		return 0, nil, fmt.Errorf(
-			"work type key %d requested but the account has no work type field", e.WorkTypeKey)
+			"work type %q requested but data tag %d has no work type field", e.WorkType, meta.DataTagID)
 	}
 	timeValue := any(map[string]any{
 		"from": map[string]any{"time": e.From},
@@ -60,10 +59,20 @@ func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *confi
 		{"field": map[string]any{"id": meta.FieldDate}, "value": map[string]any{"date": e.Date}},
 		{"field": map[string]any{"id": meta.FieldTime}, "value": timeValue},
 	}
-	if e.WorkTypeKey > 0 && meta.FieldWorkType > 0 {
+	if e.WorkType != "" {
+		v, err := workTypeValue(meta, e.WorkType)
+		if err != nil {
+			return 0, nil, err
+		}
 		cfd = append(cfd, map[string]any{
 			"field": map[string]any{"id": meta.FieldWorkType},
-			"value": map[string]any{"id": e.WorkTypeKey},
+			"value": v,
+		})
+	}
+	if e.Note != "" && meta.FieldNote != 0 {
+		cfd = append(cfd, map[string]any{
+			"field": map[string]any{"id": meta.FieldNote},
+			"value": e.Note,
 		})
 	}
 	body := map[string]any{
@@ -87,6 +96,30 @@ func (c *Client) CreateWorklogEntry(ctx context.Context, taskID int, meta *confi
 	return envelope.CommentID, raw, nil
 }
 
+// workTypeValue maps a --work-type argument onto the field's value shape:
+// a bare enum value name for list fields, an {id} object for directory-entry
+// fields. List names are validated against the tag's enum values when known.
+func workTypeValue(meta *config.WorklogMeta, s string) (any, error) {
+	if meta.WorkTypeDirectory != 0 {
+		id, err := strconv.Atoi(s)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf(
+				"invalid work type %q: work type is a directory entry on this account, pass its numeric key", s)
+		}
+		return map[string]any{"id": id}, nil
+	}
+	if len(meta.WorkTypeValues) > 0 {
+		for _, v := range meta.WorkTypeValues {
+			if strings.EqualFold(v, s) {
+				return v, nil
+			}
+		}
+		return nil, fmt.Errorf("invalid work type %q: allowed values: %s",
+			s, strings.Join(meta.WorkTypeValues, ", "))
+	}
+	return s, nil
+}
+
 // worklogEntryFields are requested from /datatag/{id}/entry/list: the
 // entry identity plus the meta's custom fields, which are requested by
 // their numeric field ids.
@@ -94,6 +127,9 @@ func worklogEntryFields(meta *config.WorklogMeta) string {
 	ids := []string{"key", "commentId", strconv.Itoa(meta.FieldDate), strconv.Itoa(meta.FieldTime)}
 	if meta.FieldWorkType != 0 {
 		ids = append(ids, strconv.Itoa(meta.FieldWorkType))
+	}
+	if meta.FieldNote != 0 {
+		ids = append(ids, strconv.Itoa(meta.FieldNote))
 	}
 	return strings.Join(ids, ",")
 }
@@ -226,7 +262,6 @@ func worklogRow(e DataTagEntry, meta *config.WorklogMeta, author string) Worklog
 	minutes := 0.0
 	for _, item := range e.CustomFieldData {
 		id := nestedInt(item, "field", "id")
-		value, _ := item["value"].(map[string]any)
 		switch {
 		case id == meta.FieldDate && id != 0:
 			row.Date = nestedStr(item, "value", "date")
@@ -238,7 +273,9 @@ func worklogRow(e DataTagEntry, meta *config.WorklogMeta, author string) Worklog
 				row.To = nestedStr(item, "value", "to", "time")
 			}
 		case meta.FieldWorkType != 0 && id == meta.FieldWorkType:
-			row.WorkType = directoryLabel(value)
+			row.WorkType = valueLabel(item["value"])
+		case meta.FieldNote != 0 && id == meta.FieldNote:
+			row.Note = valueLabel(item["value"])
 		}
 	}
 	if meta.TimeInMinutes {
@@ -271,10 +308,27 @@ func nestedStr(m map[string]any, keys ...string) string {
 	return s
 }
 
-// directoryLabel renders a directory-entry value: the name when the API
-// returns one, otherwise the numeric id.
+// valueLabel renders a custom-field value for display: enum/text strings
+// as-is, objects by name or directory value, numbers by value.
+func valueLabel(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case map[string]any:
+		return directoryLabel(t)
+	}
+	return ""
+}
+
+// directoryLabel renders an object value: the name when the API returns one,
+// then the directory entry's value, otherwise the numeric id.
 func directoryLabel(v map[string]any) string {
 	if s, _ := v["name"].(string); s != "" {
+		return s
+	}
+	if s, _ := v["value"].(string); s != "" {
 		return s
 	}
 	if n, _ := v["id"].(float64); n != 0 {

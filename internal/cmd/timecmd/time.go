@@ -26,9 +26,16 @@ type Options struct {
 // ClientFunc builds an API client.
 type ClientFunc func() (*planfix.Client, error)
 
-// MetaFunc resolves the account's worklog metadata, forcing re-discovery
-// when refresh is set.
-type MetaFunc func(ctx context.Context, c *planfix.Client, refresh bool) (*config.WorklogMeta, error)
+// MetaFunc resolves the account's worklog metadata.
+type MetaFunc func(ctx context.Context, c *planfix.Client, opts MetaOpts) (*config.WorklogMeta, error)
+
+// MetaOpts selects the worklog data tag and cache behaviour.
+type MetaOpts struct {
+	// Refresh forces schema re-resolution.
+	Refresh bool
+	// DataTag overrides the configured pin for one call (id or exact name).
+	DataTag string
+}
 
 // dateTimeLayout is the --from/--to argument format.
 const dateTimeLayout = "2006-01-02 15:04"
@@ -104,12 +111,8 @@ func parseTaskID(args []string) (int, error) {
 
 // buildEntry turns the interval flags into a WorklogEntry. Exactly one of
 // --hours or --from/--to is required; --date overrides the calendar date.
-func buildEntry(hours, from, to, dateFlag string, workType int) (planfix.WorklogEntry, error) {
+func buildEntry(hours, from, to, dateFlag string) (planfix.WorklogEntry, error) {
 	var e planfix.WorklogEntry
-	e.WorkTypeKey = workType
-	if workType < 0 {
-		return e, fmt.Errorf("invalid --work-type %d: must not be negative", workType)
-	}
 
 	// parseDate is only called when dateFlag is set.
 	parseDate := func() (time.Time, error) {
@@ -164,8 +167,7 @@ func buildEntry(hours, from, to, dateFlag string, workType int) (planfix.Worklog
 }
 
 func newAddCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) *cobra.Command {
-	var hours, from, to, dateFlag, note string
-	var workType int
+	var hours, from, to, dateFlag, note, workType, dataTag string
 	var refresh bool
 
 	cmd := &cobra.Command{
@@ -177,15 +179,16 @@ func newAddCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) *
 			if err != nil {
 				return err
 			}
-			entry, err := buildEntry(hours, from, to, dateFlag, workType)
+			entry, err := buildEntry(hours, from, to, dateFlag)
 			if err != nil {
 				return err
 			}
+			entry.WorkType, entry.Note = workType, note
 			c, err := getClient()
 			if err != nil {
 				return err
 			}
-			meta, err := getMeta(cmd.Context(), c, refresh)
+			meta, err := getMeta(cmd.Context(), c, MetaOpts{Refresh: refresh, DataTag: dataTag})
 			if err != nil {
 				return planfix.WrapHint(err)
 			}
@@ -193,7 +196,7 @@ func newAddCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) *
 			if err != nil {
 				return planfix.WrapHint(err)
 			}
-			if note != "" {
+			if note != "" && meta.FieldNote == 0 {
 				if _, _, err := c.AddComment(cmd.Context(), id, note, true); err != nil {
 					return planfix.WrapHint(fmt.Errorf("worklog %d created; note failed: %w", wid, err))
 				}
@@ -209,13 +212,15 @@ func newAddCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) *
 	cmd.Flags().StringVar(&from, "from", "", "interval start \"YYYY-MM-DD HH:MM\"")
 	cmd.Flags().StringVar(&to, "to", "", "interval end \"YYYY-MM-DD HH:MM\"")
 	cmd.Flags().StringVar(&dateFlag, "date", "", "calendar date of the entry (YYYY-MM-DD)")
-	cmd.Flags().StringVar(&note, "note", "", "follow-up comment posted after the entry")
-	cmd.Flags().IntVar(&workType, "work-type", 0, "work type directory entry key")
-	cmd.Flags().BoolVar(&refresh, "refresh-worklog-meta", false, "force worklog field re-discovery")
+	cmd.Flags().StringVar(&note, "note", "", "work details (the tag's details field, or a comment)")
+	cmd.Flags().StringVar(&workType, "work-type", "", "work type: list value name or directory entry key")
+	cmd.Flags().StringVar(&dataTag, "data-tag", "", "worklog data tag override (id or exact name)")
+	cmd.Flags().BoolVar(&refresh, "refresh-worklog-meta", false, "force worklog field re-resolution")
 	return cmd
 }
 
 func newListCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) *cobra.Command {
+	var dataTag string
 	var refresh bool
 
 	cmd := &cobra.Command{
@@ -231,7 +236,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) 
 			if err != nil {
 				return err
 			}
-			meta, err := getMeta(cmd.Context(), c, refresh)
+			meta, err := getMeta(cmd.Context(), c, MetaOpts{Refresh: refresh, DataTag: dataTag})
 			if err != nil {
 				return planfix.WrapHint(err)
 			}
@@ -247,14 +252,15 @@ func newListCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) 
 				output.Table(cmd.OutOrStdout(), nil, worklogRows(rows))
 			default:
 				output.Table(cmd.OutOrStdout(),
-					[]string{"DATE", "FROM–TO", "HOURS", "WORK TYPE", "AUTHOR"},
+					[]string{"DATE", "FROM–TO", "HOURS", "WORK TYPE", "NOTE", "AUTHOR"},
 					worklogRows(rows))
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().BoolVar(&refresh, "refresh-worklog-meta", false, "force worklog field re-discovery")
+	cmd.Flags().StringVar(&dataTag, "data-tag", "", "worklog data tag override (id or exact name)")
+	cmd.Flags().BoolVar(&refresh, "refresh-worklog-meta", false, "force worklog field re-resolution")
 	return cmd
 }
 
@@ -267,6 +273,7 @@ func worklogRows(rows []planfix.WorklogRow) [][]string {
 			r.From + "–" + r.To,
 			formatHours(r.Hours),
 			r.WorkType,
+			r.Note,
 			r.Author,
 		})
 	}
@@ -279,34 +286,57 @@ func formatHours(h float64) string {
 }
 
 // DefaultMetaFunc returns a MetaFunc backed by an in-memory cache and the
-// profile's persisted worklog block. Missing metadata is discovered via
-// worklogtag.Discover and saved back into the config profile.
+// profile's persisted worklog block. The data tag comes from the profile's
+// worklog.datatag pin (or the per-call --data-tag override); its field
+// schema is resolved via worklogtag.Resolve and saved back into the config
+// profile.
 func DefaultMetaFunc(resolveProfile func() (string, *config.Profile, error)) MetaFunc {
 	cache := map[string]*config.WorklogMeta{}
-	return func(ctx context.Context, c *planfix.Client, refresh bool) (*config.WorklogMeta, error) {
+	return func(ctx context.Context, c *planfix.Client, opts MetaOpts) (*config.WorklogMeta, error) {
 		name, p, err := resolveProfile()
 		if err != nil {
 			return nil, err
 		}
-		if !refresh {
-			if m, ok := cache[name]; ok {
+		if opts.DataTag != "" {
+			return worklogtag.Resolve(ctx, c, opts.DataTag)
+		}
+		pin := ""
+		if p != nil && p.Worklog != nil {
+			pin = p.Worklog.DataTag
+		}
+		if !opts.Refresh {
+			if m, ok := cache[name]; ok && metaMatchesPin(m, pin) {
 				return m, nil
 			}
-			if p != nil && p.Worklog != nil {
+			if p != nil && p.Worklog != nil && metaMatchesPin(p.Worklog, pin) {
 				cache[name] = p.Worklog
 				return p.Worklog, nil
 			}
 		}
-		meta, err := worklogtag.Discover(ctx, c)
+		meta, err := worklogtag.Resolve(ctx, c, pin)
 		if err != nil {
 			return nil, err
 		}
+		meta.DataTag = pin
 		if err := persistMeta(name, meta); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save worklog metadata to config: %v\n", err)
 		}
 		cache[name] = meta
 		return meta, nil
 	}
+}
+
+// metaMatchesPin reports whether cached metadata is resolved for the pinned
+// tag: a numeric pin must equal the resolved tag id, a name pin the recorded
+// tag name; incomplete (unresolved) metadata never matches.
+func metaMatchesPin(m *config.WorklogMeta, pin string) bool {
+	if m == nil || pin == "" || m.FieldDate == 0 {
+		return false
+	}
+	if id, err := strconv.Atoi(pin); err == nil {
+		return m.DataTagID == id
+	}
+	return m.DataTag == pin
 }
 
 // persistMeta writes the discovered worklog block into the named profile.

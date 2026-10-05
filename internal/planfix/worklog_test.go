@@ -15,10 +15,12 @@ import (
 
 func worklogTestMeta() *config.WorklogMeta {
 	return &config.WorklogMeta{
-		DataTagID:     123,
-		FieldDate:     456,
-		FieldTime:     789,
-		FieldWorkType: 101,
+		DataTagID:         123,
+		FieldDate:         456,
+		FieldTime:         789,
+		FieldWorkType:     101,
+		FieldNote:         202,
+		WorkTypeDirectory: 5,
 	}
 }
 
@@ -38,10 +40,10 @@ func TestCreateWorklogEntry(t *testing.T) {
 
 	c := newTestClient(t, srv)
 	id, raw, err := c.CreateWorklogEntry(context.Background(), 1, worklogTestMeta(), WorklogEntry{
-		Date:        "02-10-2026",
-		From:        "10:00",
-		To:          "12:00",
-		WorkTypeKey: 1,
+		Date:     "02-10-2026",
+		From:     "10:00",
+		To:       "12:00",
+		WorkType: "1",
 	})
 	if err != nil {
 		t.Fatalf("CreateWorklogEntry() error = %v", err)
@@ -108,9 +110,9 @@ func TestCreateWorklogEntryRequiresWorkTypeField(t *testing.T) {
 
 	c := newTestClient(t, srv)
 	meta := worklogTestMeta()
-	meta.FieldWorkType = 0 // discovered without a work-type field
+	meta.FieldWorkType = 0 // resolved without a work-type field
 	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, meta, WorklogEntry{
-		Date: "02-10-2026", From: "10:00", To: "12:00", WorkTypeKey: 1,
+		Date: "02-10-2026", From: "10:00", To: "12:00", WorkType: "1",
 	}); err == nil {
 		t.Fatal("work type without field: error = nil, want failure")
 	} else if !strings.Contains(err.Error(), "work type") {
@@ -120,7 +122,7 @@ func TestCreateWorklogEntryRequiresWorkTypeField(t *testing.T) {
 		t.Errorf("API calls = %d, want 0 (rejected before the request)", calls)
 	}
 
-	// WorkTypeKey 0 with a mapped field omits the entry.
+	// An empty WorkType with a mapped field omits the entry.
 	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, worklogTestMeta(), WorklogEntry{
 		Date: "02-10-2026", From: "10:00", To: "12:00",
 	}); err != nil {
@@ -132,24 +134,105 @@ func TestCreateWorklogEntryRequiresWorkTypeField(t *testing.T) {
 	}
 	cfd, _ := items[0].(map[string]any)["customFieldData"].([]any)
 	if len(cfd) != 2 {
-		t.Errorf("customFieldData len = %d, want 2 (WorkTypeKey 0)", len(cfd))
+		t.Errorf("customFieldData len = %d, want 2 (empty WorkType)", len(cfd))
 	}
 }
 
-func TestCreateWorklogEntryRejectsNegativeWorkType(t *testing.T) {
+func TestCreateWorklogEntryListWorkType(t *testing.T) {
+	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("API must not be called for a negative work type key")
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &body)
+		_, _ = w.Write([]byte(`{"result":"success","keys":[5],"commentId":5}`))
+	}))
+	defer srv.Close()
+
+	meta := worklogTestMeta()
+	meta.WorkTypeDirectory = 0
+	meta.WorkTypeValues = []string{"Работа", "Bugfix"}
+	c := newTestClient(t, srv)
+	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, meta, WorklogEntry{
+		Date: "02-10-2026", From: "10:00", To: "12:00", WorkType: "работа",
+	}); err != nil {
+		t.Fatalf("CreateWorklogEntry() error = %v", err)
+	}
+	items, _ := body["items"].([]any)
+	cfd, _ := items[0].(map[string]any)["customFieldData"].([]any)
+	if len(cfd) != 3 {
+		t.Fatalf("customFieldData len = %d, want 3", len(cfd))
+	}
+	wtVal := cfd[2].(map[string]any)["value"]
+	if wtVal != "Работа" {
+		t.Errorf("work type value = %v, want canonical Работа (list field takes a bare string)", wtVal)
+	}
+
+	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, meta, WorklogEntry{
+		Date: "02-10-2026", From: "10:00", To: "12:00", WorkType: "Прочее",
+	}); err == nil {
+		t.Fatal("unknown list value: error = nil, want failure")
+	} else if !strings.Contains(err.Error(), "allowed values") {
+		t.Errorf("error = %q, want allowed values listed", err)
+	}
+}
+
+func TestCreateWorklogEntryRejectsNonNumericDirectoryWorkType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("API must not be called for an invalid work type")
 		_, _ = w.Write([]byte(`{"result":"success","id":5}`))
 	}))
 	defer srv.Close()
 
 	c := newTestClient(t, srv)
 	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, worklogTestMeta(), WorklogEntry{
-		Date: "02-10-2026", From: "10:00", To: "12:00", WorkTypeKey: -1,
+		Date: "02-10-2026", From: "10:00", To: "12:00", WorkType: "Dev",
 	}); err == nil {
-		t.Fatal("negative work type: error = nil, want failure")
-	} else if !strings.Contains(err.Error(), "negative") {
-		t.Errorf("error = %q, want mention of negative", err)
+		t.Fatal("non-numeric directory work type: error = nil, want failure")
+	} else if !strings.Contains(err.Error(), "directory entry") {
+		t.Errorf("error = %q, want mention of directory entry", err)
+	}
+}
+
+func TestCreateWorklogEntryNote(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &body)
+		_, _ = w.Write([]byte(`{"result":"success","keys":[5],"commentId":5}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, worklogTestMeta(), WorklogEntry{
+		Date: "02-10-2026", From: "10:00", To: "12:00", Note: "Разобрался в логах",
+	}); err != nil {
+		t.Fatalf("CreateWorklogEntry() error = %v", err)
+	}
+	items, _ := body["items"].([]any)
+	cfd, _ := items[0].(map[string]any)["customFieldData"].([]any)
+	if len(cfd) != 3 {
+		t.Fatalf("customFieldData len = %d, want 3 (note included)", len(cfd))
+	}
+	noteItem := cfd[2].(map[string]any)
+	if noteItem["field"].(map[string]any)["id"] != float64(202) {
+		t.Errorf("note field id = %v, want 202", noteItem["field"])
+	}
+	if noteItem["value"] != "Разобрался в логах" {
+		t.Errorf("note value = %v, want bare string", noteItem["value"])
+	}
+
+	// No note field mapped: the entry omits the note (the caller falls back
+	// to a comment).
+	meta := worklogTestMeta()
+	meta.FieldNote = 0
+	if _, _, err := c.CreateWorklogEntry(context.Background(), 1, meta, WorklogEntry{
+		Date: "02-10-2026", From: "10:00", To: "12:00", Note: "x",
+	}); err != nil {
+		t.Fatalf("CreateWorklogEntry() error = %v", err)
+	}
+	items, _ = body["items"].([]any)
+	cfd, _ = items[0].(map[string]any)["customFieldData"].([]any)
+	if len(cfd) != 2 {
+		t.Errorf("customFieldData len = %d, want 2 (no note field)", len(cfd))
 	}
 }
 
@@ -215,7 +298,8 @@ func TestListWorklog(t *testing.T) {
 				{"key":1,"commentId":30,"customFieldData":[
 					{"field":{"id":456},"value":{"date":"02-10-2026"}},
 					{"field":{"id":789},"value":{"from":{"time":"10:00"},"to":{"time":"12:00"}}},
-					{"field":{"id":101},"value":{"id":1,"name":"Dev"}}
+					{"field":{"id":101},"value":{"id":1,"name":"Dev"}},
+					{"field":{"id":202},"value":"Разбор инцидента"}
 				]},
 				{"key":2,"commentId":40,"customFieldData":[
 					{"field":{"id":456},"value":{"date":"03-10-2026"}},
@@ -236,7 +320,7 @@ func TestListWorklog(t *testing.T) {
 		t.Fatalf("ListWorklog() error = %v", err)
 	}
 	fields, _ := entryBody["fields"].(string)
-	for _, want := range []string{"key", "commentId", "456", "789", "101"} {
+	for _, want := range []string{"key", "commentId", "456", "789", "101", "202"} {
 		if !strings.Contains(fields, want) {
 			t.Errorf("fields = %q, want mention of %q", fields, want)
 		}
@@ -259,6 +343,9 @@ func TestListWorklog(t *testing.T) {
 	}
 	if r0.WorkType != "Dev" {
 		t.Errorf("row0 work type = %q, want Dev", r0.WorkType)
+	}
+	if r0.Note != "Разбор инцидента" {
+		t.Errorf("row0 note = %q, want Разбор инцидента", r0.Note)
 	}
 	if r0.Author != "Ann" {
 		t.Errorf("row0 author = %q, want Ann", r0.Author)

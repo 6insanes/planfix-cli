@@ -9,14 +9,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// WorklogMeta caches the account's worklog data-tag field ids.
+// WorklogMeta caches the account's worklog data-tag field ids. DataTag is the
+// user-pinned tag selector (id or exact name); the remaining fields are
+// resolved from the tag schema and re-resolved when the pin changes.
 type WorklogMeta struct {
-	DataTagID         int `yaml:"datatag_id"`
-	FieldDate         int `yaml:"field_date"`
-	FieldTime         int `yaml:"field_time"`
-	FieldWorkType     int `yaml:"field_work_type,omitempty"`
-	FieldEmployee     int `yaml:"field_employee,omitempty"`
-	WorkTypeDirectory int `yaml:"work_type_directory,omitempty"`
+	DataTag           string   `yaml:"datatag,omitempty"`
+	DataTagID         int      `yaml:"datatag_id"`
+	FieldDate         int      `yaml:"field_date"`
+	FieldTime         int      `yaml:"field_time"`
+	FieldWorkType     int      `yaml:"field_work_type,omitempty"`
+	FieldNote         int      `yaml:"field_note,omitempty"`
+	FieldEmployee     int      `yaml:"field_employee,omitempty"`
+	WorkTypeDirectory int      `yaml:"work_type_directory,omitempty"`
+	WorkTypeValues    []string `yaml:"work_type_values,omitempty"`
 	// TimeInMinutes marks FieldTime as a spent-minutes number field
 	// instead of a from/to period-of-time field.
 	TimeInMinutes bool `yaml:"time_in_minutes,omitempty"`

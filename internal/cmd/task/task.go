@@ -16,6 +16,7 @@ type Options struct {
 	JSON   bool
 	Fields string
 	Quiet  bool
+	Plain  bool
 }
 
 // ClientFunc builds an API client.
@@ -89,7 +90,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 				}
 				rows = append(rows, row)
 			}
-			output.Table(cmd.OutOrStdout(), headers, rows)
+			output.Table(cmd.OutOrStdout(), headers, output.StripRows(rows, opts.Plain))
 			return nil
 		},
 	}
@@ -144,7 +145,7 @@ func newViewCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 					kv = append(kv, [2]string{headers[i], fieldValue(*t, name)})
 				}
 			}
-			output.Detail(cmd.OutOrStdout(), kv)
+			output.Detail(cmd.OutOrStdout(), output.StripKV(kv, opts.Plain))
 			return nil
 		},
 	}

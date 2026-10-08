@@ -22,6 +22,7 @@ type GlobalOpts struct {
 	JSON    bool
 	Fields  string
 	Quiet   bool
+	Plain   bool
 	Profile string
 }
 
@@ -48,6 +49,7 @@ func NewRootCmd() *cobra.Command {
 	pf.BoolVar(&globalOpts.JSON, "json", false, "print raw JSON response")
 	pf.StringVar(&globalOpts.Fields, "fields", "", "comma-separated fields to request/show")
 	pf.BoolVarP(&globalOpts.Quiet, "quiet", "q", false, "print only the id / drop table header")
+	pf.BoolVar(&globalOpts.Plain, "plain", false, "strip HTML from rendered values")
 	pf.StringVar(&globalOpts.Profile, "profile", "", "config profile name")
 	c.AddCommand(auth.NewCmd(func() string {
 		cfg, err := config.Load(config.ResolvePath())
@@ -62,6 +64,7 @@ func NewRootCmd() *cobra.Command {
 			JSON:   globalOpts.JSON,
 			Fields: globalOpts.Fields,
 			Quiet:  globalOpts.Quiet,
+			Plain:  globalOpts.Plain,
 		}
 	}, activeDomain))
 	c.AddCommand(comment.NewCmd(newClient, func() comment.Options {
@@ -69,6 +72,7 @@ func NewRootCmd() *cobra.Command {
 			JSON:   globalOpts.JSON,
 			Fields: globalOpts.Fields,
 			Quiet:  globalOpts.Quiet,
+			Plain:  globalOpts.Plain,
 		}
 	}))
 	c.AddCommand(project.NewCmd(newClient, func() project.Options {
@@ -76,6 +80,7 @@ func NewRootCmd() *cobra.Command {
 			JSON:   globalOpts.JSON,
 			Fields: globalOpts.Fields,
 			Quiet:  globalOpts.Quiet,
+			Plain:  globalOpts.Plain,
 		}
 	}))
 	c.AddCommand(user.NewCmd(newClient, func() user.Options {
@@ -83,10 +88,11 @@ func NewRootCmd() *cobra.Command {
 			JSON:   globalOpts.JSON,
 			Fields: globalOpts.Fields,
 			Quiet:  globalOpts.Quiet,
+			Plain:  globalOpts.Plain,
 		}
 	}))
 	c.AddCommand(timecmd.NewCmd(newClient, func() timecmd.Options {
-		return timecmd.Options{JSON: globalOpts.JSON, Quiet: globalOpts.Quiet}
+		return timecmd.Options{JSON: globalOpts.JSON, Quiet: globalOpts.Quiet, Plain: globalOpts.Plain}
 	}, timecmd.DefaultMetaFunc(func() (string, *config.Profile, error) {
 		path := config.ResolvePath()
 		cfg, err := config.Load(path)

@@ -19,6 +19,7 @@ type Options struct {
 	JSON   bool
 	Fields string
 	Quiet  bool
+	Plain  bool
 }
 
 // ClientFunc builds an API client.
@@ -141,7 +142,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command {
 						cm.Text,
 					})
 				}
-				output.Table(cmd.OutOrStdout(), []string{"ID", "CREATED", "AUTHOR", "TEXT"}, rows)
+				output.Table(cmd.OutOrStdout(), []string{"ID", "CREATED", "AUTHOR", "TEXT"}, output.StripRows(rows, opts.Plain))
 			}
 			return nil
 		},

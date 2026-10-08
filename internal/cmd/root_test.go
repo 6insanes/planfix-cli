@@ -25,7 +25,7 @@ func execute(t *testing.T, args ...string) string {
 
 func TestRootHelpListsGlobalFlags(t *testing.T) {
 	out := execute(t, "--help")
-	for _, flag := range []string{"--json", "--fields", "--quiet", "-q", "--profile"} {
+	for _, flag := range []string{"--json", "--fields", "--quiet", "-q", "--plain", "--profile"} {
 		if !strings.Contains(out, flag) {
 			t.Errorf("help output missing %q\n--- output ---\n%s", flag, out)
 		}
@@ -40,8 +40,8 @@ func TestRootNoArgsPrintsHelp(t *testing.T) {
 }
 
 func TestGlobalFlagsParse(t *testing.T) {
-	execute(t, "--json", "--fields", "id,name", "-q", "--profile", "work")
-	want := GlobalOpts{JSON: true, Fields: "id,name", Quiet: true, Profile: "work"}
+	execute(t, "--json", "--fields", "id,name", "-q", "--plain", "--profile", "work")
+	want := GlobalOpts{JSON: true, Fields: "id,name", Quiet: true, Plain: true, Profile: "work"}
 	if globalOpts != want {
 		t.Errorf("globalOpts = %+v, want %+v", globalOpts, want)
 	}

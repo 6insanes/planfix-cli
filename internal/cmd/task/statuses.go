@@ -69,7 +69,8 @@ func newStatusesCmd(getClient ClientFunc, getOpts func() Options) *cobra.Command
 						current,
 					})
 				}
-				output.Table(cmd.OutOrStdout(), []string{"ID", "NAME", "ACTIVE", "CURRENT"}, rows)
+				output.Table(cmd.OutOrStdout(), []string{"ID", "NAME", "ACTIVE", "CURRENT"},
+					output.StripRows(rows, opts.Plain))
 			}
 			return nil
 		},

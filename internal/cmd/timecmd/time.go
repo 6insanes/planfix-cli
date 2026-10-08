@@ -21,6 +21,7 @@ import (
 type Options struct {
 	JSON  bool
 	Quiet bool
+	Plain bool
 }
 
 // ClientFunc builds an API client.
@@ -253,7 +254,7 @@ func newListCmd(getClient ClientFunc, getOpts func() Options, getMeta MetaFunc) 
 			default:
 				output.Table(cmd.OutOrStdout(),
 					[]string{"DATE", "FROM–TO", "HOURS", "WORK TYPE", "NOTE", "AUTHOR"},
-					worklogRows(rows))
+					output.StripRows(worklogRows(rows), opts.Plain))
 			}
 			return nil
 		},

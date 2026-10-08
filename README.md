@@ -87,13 +87,17 @@ nothing there needs to be written by hand.
     planfix ping
     planfix auth login|status|logout
 
-Global flags: `--json`, `--fields`, `-q`, `--profile`.
+Global flags: `--json`, `--fields`, `-q`, `--plain`, `--profile`.
+
+`--plain` strips HTML from rendered values: `task view --plain` prints the
+description as plain text instead of raw markup.
 
 ### Tasks
 
     planfix task list --saved-filter :in
     planfix task list --filter '[{"field":"status","operator":"neq","values":["6"]}]'
     planfix task view 2276867
+    planfix task view 2276867 --plain
     planfix task statuses 2276867
     planfix task create --name "fix the bug" --assignees user:123 --end-date 2026-10-10
     planfix task update 2276867 --status 2 --assignees user:123

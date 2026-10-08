@@ -228,6 +228,51 @@ func TestViewRendersAssignees(t *testing.T) {
 	}
 }
 
+func TestViewPlainStripsHTMLDescription(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":"success","task":{
+			"id":42,"name":"Ship it","description":"<p>Do <b>it</b></p><h2>Spec</h2><ul><li>a</li></ul>",
+			"status":{"id":3,"name":"Done"},"priority":"urgent"
+		}}`))
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{Plain: true} }, func() string { return "example.com" })
+	out, err := exec(t, cmd, "view", "42")
+	if err != nil {
+		t.Fatalf("view error = %v", err)
+	}
+	for _, unwanted := range []string{"<p>", "<b>", "<h2>", "<li>"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("plain view output contains %q:\n%s", unwanted, out)
+		}
+	}
+	for _, want := range []string{"Do it", "Spec", "- a"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plain view output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestViewWithoutPlainKeepsHTML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":"success","task":{
+			"id":42,"name":"Ship it","description":"<p>Do it</p>",
+			"status":{"id":3,"name":"Done"},"priority":"urgent"
+		}}`))
+	}))
+	defer srv.Close()
+
+	cmd := NewCmd(stubClient(srv), func() Options { return Options{} }, func() string { return "example.com" })
+	out, err := exec(t, cmd, "view", "42")
+	if err != nil {
+		t.Fatalf("view error = %v", err)
+	}
+	if !strings.Contains(out, "<p>Do it</p>") {
+		t.Errorf("default view output must keep raw HTML:\n%s", out)
+	}
+}
+
 func TestViewFieldsWithSpacesRoundTrip(t *testing.T) {
 	var gotFields string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
